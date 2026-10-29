@@ -1,0 +1,61 @@
+# ---- Dataset: never commit (CC BY-NC 4.0, not ours to redistribute) ----
+data/**
+!data/
+!data/README.md
+!data/*/
+!data/*/.gitkeep
+
+# Kaggle archives / raw downloads anywhere in the repo
+*.zip
+*.tar
+*.tar.gz
+*.7z
+MAGFiLO*/
+**/train_images/
+**/test_images/
+
+# Images and masks (in case they end up outside data/)
+*.jpg
+*.jpeg
+*.png
+*.fits
+*.fits.gz
+*.npy
+*.npz
+*.h5
+*.hdf5
+*.parquet
+
+# ---- Large artifacts ----
+outputs/**
+!outputs/.gitkeep
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.safetensors
+*.bin
+submission*.csv
+wandb/
+lightning_logs/
+mlruns/
+runs/
+
+# ---- Credentials ----
+kaggle.json
+.env
+*.env
+
+# ---- Python / tooling ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.ipynb_checkpoints/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.DS_Store
+.vscode/
+.idea/
