@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+import scipy.sparse as sp
 
 from solar_k import metric
 
@@ -123,3 +124,24 @@ def test_aggregation_sums_across_images_not_mean_of_pq():
     result = metric.score_dataset([(gt1, pred1), (gt2, pred2)])
     # global: TP=1, FP=0, FN=1 -> PQ = 1 / (1 + 0.5) = 2/3, NOT (1 + 0)/2 = 0.5
     assert result.pq == pytest.approx(2 / 3)
+
+
+def test_pairwise_iou_dice_sparse_pred_matches_dense():
+    gt = _stack([_mask(6, 6, (0, 1, 0, 1)), _mask(6, 6, (3, 5, 3, 5))])
+    pred_dense = _stack([_mask(6, 6, (0, 1, 0, 1)), _mask(6, 6, (3, 4, 3, 4))])  # partial overlap on 2nd
+
+    iou_dense, dice_dense = metric.pairwise_iou_dice(gt, pred_dense)
+
+    pred_sparse = sp.csr_matrix(pred_dense.reshape(2, -1))
+    iou_sparse, dice_sparse = metric.pairwise_iou_dice(gt, pred_sparse)
+
+    assert np.allclose(iou_dense, iou_sparse)
+    assert np.allclose(dice_dense, dice_sparse)
+
+
+def test_pairwise_iou_dice_sparse_zero_pred_rows():
+    gt = _stack([_mask(6, 6, (0, 1, 0, 1))])
+    pred_sparse = sp.csr_matrix((0, 36), dtype=np.uint8)
+    iou, dice = metric.pairwise_iou_dice(gt, pred_sparse)
+    assert iou.shape == (1, 0)
+    assert dice.shape == (1, 0)

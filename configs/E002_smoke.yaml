@@ -1,0 +1,32 @@
+# Mac smoke test: 50 iterations on MPS, must run train -> resume -> infer ->
+# evaluate on 4 val images before anything goes to Kaggle (CODING_SPEC_02_BASELINE.md).
+experiment_id: E002_smoke
+description: tiny smoke-test config, not a real experiment
+seed: 42
+fold: 0
+device: auto
+encoder_name: resnet34
+crop_size: 512
+batch_size: 2
+dataset_length: 20
+total_iterations: 50
+warmup_steps: 5
+lr: 0.0003
+weight_decay: 0.0001
+checkpoint_every: 25
+log_every: 10
+amp: false
+n_val_images: 4
+num_workers: 0
+cache_workers: 1
+prebuild_cache: false  # tiny dataset_length=20 builds cache on demand; full prebuild would needlessly preprocess all ~565 non-fold0 train images
+save_oof_and_test_probs: false  # smoke_e002.py does its own small infer+evaluate instead
+infer_tile_size: 512
+infer_overlap: 64
+postprocess:
+  mode: threshold
+  t: 0.5
+  t_low: 0.3
+  t_high: 0.6
+  closing_radius: 1
+  min_area: 50

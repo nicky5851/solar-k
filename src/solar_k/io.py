@@ -41,6 +41,28 @@ def external_dir() -> Path:
     return data_root() / "external"
 
 
+def output_root() -> Path:
+    """``SOLAR_K_OUTPUT`` env var if set, else ``<repo_root>/outputs``.
+
+    On Kaggle this should point at ``/kaggle/working/outputs`` so
+    checkpoints, logs, and probability maps land directly in the persisted
+    working directory instead of needing a copy step at the end of a run.
+    """
+    env = os.environ.get("SOLAR_K_OUTPUT")
+    return Path(env).resolve() if env else repo_root() / "outputs"
+
+
+def cache_root() -> Path:
+    """``SOLAR_K_CACHE`` env var if set, else ``<data_root>/processed``.
+
+    Separate from ``data_root()`` because the preprocessing cache needs a
+    writable, fast local disk -- on Kaggle, the competition data mount is
+    read-only, so this should point at ``/kaggle/temp`` instead.
+    """
+    env = os.environ.get("SOLAR_K_CACHE")
+    return Path(env).resolve() if env else data_root() / "processed"
+
+
 IMAGE_SUFFIXES = (".jpg", ".jpeg")
 
 

@@ -27,23 +27,46 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 import numpy as np
+import scipy.sparse as sp
 
 IOU_THRESHOLD = 0.5
 
 
-def _flatten(masks: np.ndarray) -> np.ndarray:
-    n = masks.shape[0]
-    return masks.reshape(n, -1).astype(np.float64)
+def _to_sparse(masks) -> sp.csr_matrix:
+    """Dense ``(n, H, W)`` stack or scipy sparse ``(n, H*W)`` -> float64 CSR.
+
+    Real instance masks (GT or pred) are sparse: a filament covers a tiny
+    fraction of a 2048x2048 image. Building this via ``sp.csr_matrix`` from
+    the dense array costs memory proportional to the number of *foreground*
+    pixels (nnz), never ``n * H * W`` -- unlike the plain dense-float64
+    flatten this used to go through, which is cheap for the toy-sized masks
+    the unit tests use but allocates hundreds of MB to several GB per call
+    on real 2048x2048 masks, repeated thousands of times across a tuning
+    grid search (see ``tuning.py``).
+    """
+    if sp.issparse(masks):
+        sparse = masks
+    else:
+        n = masks.shape[0]
+        sparse = sp.csr_matrix(masks.reshape(n, -1))
+    return sparse.astype(np.float64) if sparse.dtype != np.float64 else sparse
 
 
-def pairwise_iou_dice(gt_masks: np.ndarray, pred_masks: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """``(n_gt, n_pred)`` IoU and Dice matrices. Mirrors ``get_overlap_matrices``."""
-    gt_flat = _flatten(gt_masks)
-    pred_flat = _flatten(pred_masks)
+def pairwise_iou_dice(gt_masks, pred_masks) -> tuple[np.ndarray, np.ndarray]:
+    """``(n_gt, n_pred)`` IoU and Dice matrices. Mirrors ``get_overlap_matrices``.
 
-    intersection = gt_flat @ pred_flat.T
-    gt_areas = gt_flat.sum(axis=1, keepdims=True)
-    pred_areas = pred_flat.sum(axis=1, keepdims=True).T
+    Accepts either side as a dense ``(n, H, W)`` stack (matching the official
+    notebook) or a scipy sparse ``(n, H*W)`` matrix (see
+    ``postprocess.extract_instances_sparse``, used when an untuned
+    grid-search cell can produce thousands of instances); the arithmetic is
+    identical either way.
+    """
+    gt_sparse = _to_sparse(gt_masks)
+    pred_sparse = _to_sparse(pred_masks)
+
+    intersection = np.asarray((gt_sparse @ pred_sparse.T).todense())
+    gt_areas = np.asarray(gt_sparse.sum(axis=1)).reshape(-1, 1)
+    pred_areas = np.asarray(pred_sparse.sum(axis=1)).reshape(1, -1)
 
     union = gt_areas + pred_areas - intersection
     iou = np.divide(intersection, union, out=np.zeros_like(intersection), where=union > 0)

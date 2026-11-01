@@ -1,0 +1,13 @@
+experiment_id: E001
+description: classical baseline -- black top-hat dark-feature map + postprocess.py
+seed: 0
+model:
+  type: classical
+  kernel_radius: 9
+postprocess:
+  mode: threshold
+  t: 0.5
+  t_low: 0.3
+  t_high: 0.6
+  closing_radius: 1
+  min_area: 50

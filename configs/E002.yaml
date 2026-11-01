@@ -1,0 +1,30 @@
+experiment_id: E002
+description: semantic U-Net (resnet34/imagenet) + postprocess.py connected components
+seed: 42
+fold: 0
+device: auto
+encoder_name: resnet34
+crop_size: 512
+batch_size: 8
+dataset_length: null  # defaults to len(train_stems) * 20 in SolarCropDataset
+total_iterations: 6000
+warmup_steps: 300
+lr: 0.0003
+weight_decay: 0.0001
+checkpoint_every: 500
+log_every: 100
+amp: true
+n_val_images: 20
+num_workers: 4
+cache_workers: 4
+prebuild_cache: true
+save_oof_and_test_probs: true
+infer_tile_size: 1024
+infer_overlap: 128
+postprocess:
+  mode: threshold
+  t: 0.5
+  t_low: 0.3
+  t_high: 0.6
+  closing_radius: 1
+  min_area: 50
