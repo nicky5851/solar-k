@@ -1,0 +1,41 @@
+experiment_id: E004-f0
+description: >
+  CODING_SPEC_03_FP_AND_FOLDS.md E004, fold 0 (retrained under the new
+  settings so all five folds are comparable): same model as E002
+  (resnet34/imagenet U-Net) with EMA of weights (decay 0.999, used for
+  evaluation and saving) and checkpoint selection by instance PQ (every
+  1000 iters, full-res inference + E002's tuned postprocess on a fixed
+  40-image val subset) instead of pixel Dice. 4000 iterations, down from
+  E002's 6000 -- report 02 found E002's best checkpoint was at iteration
+  2000/6000 and val Dice never recovered after.
+seed: 42
+fold: 0
+device: auto
+encoder_name: resnet34
+crop_size: 512
+batch_size: 8
+dataset_length: null
+total_iterations: 4000
+warmup_steps: 300
+lr: 0.0003
+weight_decay: 0.0001
+checkpoint_every: 1000
+log_every: 100
+amp: true
+ema_decay: 0.999
+checkpoint_select_by: pq
+n_pq_val_images: 40
+num_workers: 4
+cache_workers: 4
+prebuild_cache: true
+save_oof_and_test_probs: true
+infer_tile_size: 1024
+infer_overlap: 128
+# Used only for the periodic PQ-checkpoint-selection metric (E002's tuned
+# postprocess, report 02) -- not applied to the saved OOF/test probs, which
+# stay raw (postprocessing/tuning happens locally, same as E002).
+checkpoint_postprocess:
+  mode: threshold
+  t: 0.7
+  closing_radius: 2
+  min_area: 418

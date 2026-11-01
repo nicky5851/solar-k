@@ -101,6 +101,37 @@ def _load_processed_and_target(stem: str, train_paths: dict, images_by_file: dic
     return processed, target
 
 
+def run_pq_validation(model, device, stems, train_paths, images_by_file, anns_by_image_id, pp_cfg, tile_size: int, overlap: int) -> float:
+    """CODING_SPEC_03_FP_AND_FOLDS.md E004: checkpoint selection by instance
+    PQ instead of pixel Dice -- full-resolution flip-TTA inference + the
+    fixed postprocess config (E002's tuned settings by default) on a small
+    fixed val subset, scored the same way the report scripts do."""
+    from solar_k import evaluate as skeval
+    from solar_k import ids as skids
+    from solar_k import metric as skmetric
+    from solar_k import postprocess as skpp
+    from solar_k import targets as sktgt
+
+    model.eval()
+    prob_fn = sku.make_prob_fn(model, device, tta_flips=True, tile_size=tile_size, overlap=overlap)
+    matches = []
+    with torch.no_grad():
+        for stem in stems:
+            processed, disk_info = skpre.load_or_build(stem, train_paths[stem])
+            disk_mask, _ = skpre.disk_mask_and_r(processed.shape, *disk_info)
+            probs = prob_fn(processed, disk_mask)
+            pred_sparse = skpp.postprocess_sparse(probs, pp_cfg)
+            for e in images_by_file.get(f"{stem}.jpeg", []):
+                annotator, _ = skids.parse_image_id(e["id"])
+                inst_masks = sktgt.annotator_instance_masks(anns_by_image_id.get(e["id"], []), *processed.shape)
+                gt_masks = np.stack(inst_masks) if inst_masks else np.zeros((0, *processed.shape), dtype=np.uint8)
+                r = skeval.evaluate_annotator_image(stem, annotator, pred_sparse, gt_masks, disk_info=disk_info)
+                matches.append(r.match)
+            del probs, pred_sparse
+    model.train()
+    return skmetric.aggregate_matches(matches).pq if matches else 0.0
+
+
 def downsampled_validate(model, device, val_stems, train_paths, images_by_file, anns_by_image_id, size: int = 512) -> float:
     model.eval()
     dices = []
@@ -212,6 +243,26 @@ def main() -> None:
         model, cfg.get("lr", 3e-4), cfg.get("weight_decay", 1e-4), cfg.get("warmup_steps", 300), total_iters
     )
 
+    # CODING_SPEC_03_FP_AND_FOLDS.md E004: EMA of weights, used for both the
+    # periodic validation metric and what gets saved to best.pt/last.pt.
+    # Opt-in via config (absent -> old E002 behaviour: validate/save the raw
+    # model), so configs/E002.yaml stays reproducible unchanged.
+    ema_decay = cfg.get("ema_decay")
+    ema = sku.EMA(model, ema_decay) if ema_decay else None
+    eval_model = sku.build_model(encoder_name=cfg.get("encoder_name", "resnet34"), encoder_weights=None).to(device) if ema is not None else None
+
+    checkpoint_select_by = cfg.get("checkpoint_select_by", "pixel_dice")
+    pq_val_stems, pq_postprocess_cfg = None, None
+    if checkpoint_select_by == "pq":
+        from solar_k import postprocess as skpp
+
+        pq_val_stems = all_val_stems[: cfg.get("n_pq_val_images", 40)]
+        pp = cfg.get("checkpoint_postprocess", {})
+        pq_postprocess_cfg = skpp.PostprocessConfig(
+            mode=pp.get("mode", "threshold"), t=pp.get("t", 0.7),
+            closing_radius=pp.get("closing_radius", 2), min_area=pp.get("min_area", 418),
+        )
+
     ckpt_dir = skio.output_root() / cfg["experiment_id"] / "checkpoints"
     last_ckpt_path = ckpt_dir / "last.pt"
     best_ckpt_path = ckpt_dir / "best.pt"
@@ -221,7 +272,7 @@ def main() -> None:
     if args.resume is not None:
         resume_path = last_ckpt_path if args.resume == "__default__" else Path(args.resume)
         if resume_path.exists():
-            ckpt = sku.load_checkpoint(resume_path, model, optimizer, scheduler, map_location=device)
+            ckpt = sku.load_checkpoint(resume_path, model, optimizer, scheduler, map_location=device, ema=ema)
             start_iter = ckpt["iteration"]
             best_metric = ckpt.get("best_metric", -1.0)
             print(f"Resumed from {resume_path} at iteration {start_iter}")
@@ -260,6 +311,8 @@ def main() -> None:
             optimizer.step()
         scheduler.step()
         it += 1
+        if ema is not None:
+            ema.update(model)
 
         if it % log_every == 0:
             now = time.time()
@@ -269,18 +322,31 @@ def main() -> None:
             log_t, log_iter = now, it
 
         if it % checkpoint_every == 0 or it == total_iters:
-            val_dice = downsampled_validate(model, device, val_stems_for_training, train_paths, images_by_file, anns_by_image_id)
-            is_best = val_dice > best_metric
-            best_metric = max(best_metric, val_dice)
-            sku.save_checkpoint(last_ckpt_path, model, optimizer, scheduler, it, best_metric)
+            if ema is not None:
+                ema.copy_to(eval_model)
+                eval_target = eval_model
+            else:
+                eval_target = model
+            if checkpoint_select_by == "pq":
+                val_metric = run_pq_validation(
+                    eval_target, device, pq_val_stems, train_paths, images_by_file, anns_by_image_id,
+                    pq_postprocess_cfg, cfg.get("infer_tile_size", 1024), cfg.get("infer_overlap", 128),
+                )
+                metric_name = "val_pq"
+            else:
+                val_metric = downsampled_validate(eval_target, device, val_stems_for_training, train_paths, images_by_file, anns_by_image_id)
+                metric_name = "val_dice"
+            is_best = val_metric > best_metric
+            best_metric = max(best_metric, val_metric)
+            sku.save_checkpoint(last_ckpt_path, model, optimizer, scheduler, it, best_metric, ema=ema)
             if is_best:
-                sku.save_checkpoint(best_ckpt_path, model, optimizer, scheduler, it, best_metric)
+                sku.save_checkpoint(best_ckpt_path, model, optimizer, scheduler, it, best_metric, ema=ema)
             elapsed = time.time() - run_start
-            print(f"iter {it}/{total_iters} loss={loss.item():.4f} val_dice={val_dice:.4f} "
+            print(f"iter {it}/{total_iters} loss={loss.item():.4f} {metric_name}={val_metric:.4f} "
                   f"best={best_metric:.4f} ({elapsed:.1f}s elapsed)")
 
         if args.max_hours is not None and (time.time() - run_start) / 3600 >= args.max_hours:
-            sku.save_checkpoint(last_ckpt_path, model, optimizer, scheduler, it, best_metric)
+            sku.save_checkpoint(last_ckpt_path, model, optimizer, scheduler, it, best_metric, ema=ema)
             print(f"--max_hours {args.max_hours} reached at iter {it}/{total_iters}; checkpoint saved, stopping cleanly.")
             stopped_early = True
             break
@@ -289,7 +355,12 @@ def main() -> None:
 
     if cfg.get("save_oof_and_test_probs", True):
         best_path = best_ckpt_path if best_ckpt_path.exists() else last_ckpt_path
-        sku.load_checkpoint(best_path, model, map_location=device, restore_rng=False)
+        best_ckpt = sku.load_checkpoint(best_path, model, map_location=device, restore_rng=False)
+        if ema is not None and best_ckpt.get("ema") is not None:
+            ema_for_infer = sku.EMA(model, ema_decay)
+            ema_for_infer.load_state_dict(best_ckpt["ema"])
+            ema_for_infer.copy_to(model)
+            print("Using EMA weights (from the checkpoint's saved shadow) for OOF/test inference.")
         tile_size, overlap = cfg.get("infer_tile_size", 1024), cfg.get("infer_overlap", 128)
 
         oof_dir = skio.output_root() / cfg["experiment_id"] / "oof"

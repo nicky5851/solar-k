@@ -46,6 +46,18 @@ def semantic_union(instances: list[np.ndarray], shape: tuple[int, int]) -> np.nd
     return out
 
 
+def _semantic_union_any(masks, shape: tuple[int, int]) -> np.ndarray:
+    """``semantic_union`` that also accepts a sparse ``(n, H*W)`` CSR stack
+    (as produced by ``postprocess.extract_instances_sparse``) without ever
+    densifying the individual rows."""
+    if sp.issparse(masks):
+        if masks.shape[0] == 0:
+            return np.zeros(shape, dtype=np.uint8)
+        summed = np.asarray(masks.sum(axis=0)).reshape(shape)
+        return (summed > 0).astype(np.uint8)
+    return semantic_union(list(masks), shape)
+
+
 def _union_find_components(n_gt: int, n_pred: int, edges: list[tuple[int, int]]):
     parent = list(range(n_gt + n_pred))
 
@@ -134,6 +146,8 @@ class AnnotatorImageResult:
     fp_r_over_r: list[float] = field(default_factory=list)
     tp_r_over_r: list[float] = field(default_factory=list)
     site: str | None = None
+    pixel_iou: float | None = None
+    pixel_dice: float | None = None
 
 
 def _r_over_r_from_coords(ys: np.ndarray, xs: np.ndarray, cx: float, cy: float, radius: float) -> float:
@@ -171,6 +185,7 @@ def evaluate_annotator_image(
     site: str | None = None,
     iou_threshold: float = skmetric.IOU_THRESHOLD,
     weak_iou: float = WEAK_IOU,
+    compute_pixel_metrics: bool = False,
 ) -> AnnotatorImageResult:
     n_gt, n_pred = gt_masks.shape[0], pred_masks.shape[0]
     if n_gt == 0 or n_pred == 0:
@@ -203,6 +218,12 @@ def evaluate_annotator_image(
         fp_r = [_r_over_r_from_coords(ys, xs, cx, cy, radius) for _, ys, xs in fp_instances]
         tp_r = [_instance_r_over_r(gt_masks[i], cx, cy, radius) for i, _ in tp_pairs]
 
+    pixel_iou = pixel_dice = None
+    if compute_pixel_metrics:
+        pred_semantic = _semantic_union_any(pred_masks, shape)
+        gt_semantic = _semantic_union_any(gt_masks, shape)
+        pixel_iou, pixel_dice = pixel_iou_dice(pred_semantic, gt_semantic)
+
     return AnnotatorImageResult(
         stem=stem,
         annotator=annotator,
@@ -215,6 +236,8 @@ def evaluate_annotator_image(
         fp_r_over_r=fp_r,
         tp_r_over_r=tp_r,
         site=site,
+        pixel_iou=pixel_iou,
+        pixel_dice=pixel_dice,
     )
 
 
@@ -251,6 +274,8 @@ class EvaluationSummary:
     non_noisy_slice_pq: float | None
     mean_inference_seconds: float | None
     details_df: pd.DataFrame
+    pixel_iou_mean: float | None = None
+    pixel_dice_mean: float | None = None
 
 
 def _pq_from_tp_fp_fn(tp_ious: list[float], fp: int, fn: int) -> dict:
@@ -318,6 +343,9 @@ def aggregate_evaluation(
     inference_times = list(inference_seconds_by_stem.values())
     mean_inf = float(np.mean(inference_times)) if inference_times else None
 
+    pixel_ious = [r.pixel_iou for r in results if r.pixel_iou is not None]
+    pixel_dices = [r.pixel_dice for r in results if r.pixel_dice is not None]
+
     return EvaluationSummary(
         overall=overall,
         per_site_pq=per_site_pq,
@@ -328,4 +356,6 @@ def aggregate_evaluation(
         non_noisy_slice_pq=non_noisy_pq,
         mean_inference_seconds=mean_inf,
         details_df=df,
+        pixel_iou_mean=float(np.mean(pixel_ious)) if pixel_ious else None,
+        pixel_dice_mean=float(np.mean(pixel_dices)) if pixel_dices else None,
     )

@@ -28,6 +28,33 @@ def build_model(encoder_name: str = "resnet34", encoder_weights: str | None = "i
     return smp.Unet(encoder_name=encoder_name, encoder_weights=encoder_weights, in_channels=1, classes=1)
 
 
+class EMA:
+    """Exponential moving average of a model's weights (CODING_SPEC_03_FP_AND_FOLDS.md,
+    E004: decay 0.999, used for evaluation and for the saved checkpoints --
+    the raw model keeps training/backpropagating as usual, and only this
+    shadow copy is what gets validated and written to best.pt/last.pt)."""
+
+    def __init__(self, model: torch.nn.Module, decay: float):
+        self.decay = decay
+        self.shadow = {k: v.detach().clone() for k, v in model.state_dict().items()}
+
+    def update(self, model: torch.nn.Module) -> None:
+        for k, v in model.state_dict().items():
+            if v.dtype.is_floating_point:
+                self.shadow[k].mul_(self.decay).add_(v.detach(), alpha=1 - self.decay)
+            else:
+                self.shadow[k] = v.detach().clone()  # integer buffers (e.g. num_batches_tracked): copy, don't average
+
+    def state_dict(self) -> dict:
+        return self.shadow
+
+    def load_state_dict(self, sd: dict) -> None:
+        self.shadow = {k: v.clone() for k, v in sd.items()}
+
+    def copy_to(self, model: torch.nn.Module) -> None:
+        model.load_state_dict(self.shadow, strict=True)
+
+
 def capture_rng_state() -> dict:
     state = {"python": random.getstate(), "numpy": np.random.get_state(), "torch": torch.random.get_rng_state()}
     if torch.cuda.is_available():
@@ -46,7 +73,7 @@ def restore_rng_state(state: dict) -> None:
         torch.cuda.set_rng_state_all(state["cuda"])
 
 
-def save_checkpoint(path: Path, model, optimizer, scheduler, iteration: int, best_metric: float) -> None:
+def save_checkpoint(path: Path, model, optimizer, scheduler, iteration: int, best_metric: float, ema: "EMA | None" = None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(
         {
@@ -56,12 +83,13 @@ def save_checkpoint(path: Path, model, optimizer, scheduler, iteration: int, bes
             "iteration": iteration,
             "rng_state": capture_rng_state(),
             "best_metric": best_metric,
+            "ema": ema.state_dict() if ema is not None else None,
         },
         path,
     )
 
 
-def load_checkpoint(path: Path, model, optimizer=None, scheduler=None, map_location=None, restore_rng: bool = True) -> dict:
+def load_checkpoint(path: Path, model, optimizer=None, scheduler=None, map_location=None, restore_rng: bool = True, ema: "EMA | None" = None) -> dict:
     ckpt = torch.load(path, map_location=map_location, weights_only=False)
     model.load_state_dict(ckpt["model"])
     if optimizer is not None and ckpt.get("optimizer") is not None:
@@ -70,6 +98,8 @@ def load_checkpoint(path: Path, model, optimizer=None, scheduler=None, map_locat
         scheduler.load_state_dict(ckpt["scheduler"])
     if restore_rng and ckpt.get("rng_state") is not None:
         restore_rng_state(ckpt["rng_state"])
+    if ema is not None and ckpt.get("ema") is not None:
+        ema.load_state_dict(ckpt["ema"])
     return ckpt
 
 

@@ -16,9 +16,9 @@ from . import evaluate as skeval
 from . import metric as skmetric
 from . import postprocess as skpp
 
-SINGLE_T_GRID = [round(0.3 + 0.05 * i, 2) for i in range(9)]  # 0.30 .. 0.70
-HYSTERESIS_T_LOW = [0.2, 0.3, 0.4]
-HYSTERESIS_T_HIGH = [0.5, 0.6, 0.7]
+SINGLE_T_GRID = [round(0.5 + 0.025 * i, 3) for i in range(19)]  # 0.50 .. 0.95, step 0.025 (CODING_SPEC_03)
+HYSTERESIS_T_LOW = [0.5, 0.6, 0.7]
+HYSTERESIS_T_HIGH = [0.7, 0.8, 0.9, 0.95]
 R_GRID = [0, 1, 2, 3]
 
 
