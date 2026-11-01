@@ -66,6 +66,10 @@ venv/
 !**/README.md
 docs/
 
+# ---- Spec reports and their figures (tracked, unlike other planning docs) ----
+!reports/*.md
+!reports/figures/**
+
 # ---- Paper (Overleaf template, tracked) ----
 !reports/paper/**
 reports/paper/**/*.aux
