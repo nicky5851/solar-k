@@ -15,11 +15,12 @@ used to choose a threshold). The inter-annotator reference is Spec 01's
 | Experiment | PQ | SQ | RQ | TP | FP | FN | Kaggle LB | Notes |
 |---|---|---|---|---|---|---|---|---|
 | Inter-annotator ref. | 0.3399 | 0.6337 | 0.5364 | 4292 | 3709 | 3709 | — | human ceiling, full train set (1196 A-vs-B comparisons), not the report half |
-| E001 (classical dark-feature + CC) | 0.0346 | 0.6317 | 0.0547 | 52 | 1059 | 738 | — | tuned t=0.5, closing_radius=0, min_area=418 |
-| E002 (U-Net resnet34 + CC) | 0.2691 | 0.6509 | 0.4134 | 486 | 1075 | 304 | — | tuned t=0.7, closing_radius=2, min_area=418, seed=42, 6000 iters |
+| E001 (classical dark-feature + CC) | 0.0346 | 0.6317 | 0.0547 | 52 | 1059 | 738 | 0.03 | tuned t=0.5, closing_radius=0, min_area=418 |
+| E002 (U-Net resnet34 + CC) | 0.2691 | 0.6509 | 0.4134 | 486 | 1075 | 304 | 0.24 | tuned t=0.7, closing_radius=2, min_area=418, seed=42, 6000 iters |
 
-`kaggle_public_score` is blank in `experiments.csv` for both — neither CSV
-has been submitted to the competition leaderboard yet.
+Local validation tracks the public leaderboard closely for both (E001: 0.035
+local vs 0.03 public; E002: 0.269 local vs 0.24 public) — the report-half
+tune/report split isn't leaking into an optimistic local number.
 
 Pixel Dice/IoU was **not** separately aggregated by `evaluate.py`'s report
 scripts for either experiment (the function `pixel_iou_dice` exists but
@@ -325,10 +326,9 @@ pytest
   resume-from-checkpoint tests included from earlier Spec 02 work).
 - Mac smoke test (50-iter MPS train → resume → infer → evaluate on 4 val
   images) passed before the full Kaggle run, per the earlier Spec 02 work.
-- Both `E001.csv` and `E002.csv` validate via `validate_submission.py`.
-  **Neither has been submitted to Kaggle yet** — the acceptance criterion
-  "at least one has been submitted" is **not yet met**; `kaggle competitions
-  submit` was not run this session.
+- Both `E001.csv` and `E002.csv` validate via `validate_submission.py`, and
+  **both were submitted to Kaggle** (public LB: E001 = 0.03, E002 = 0.24,
+  recorded in `experiments.csv`) — the acceptance criterion is met.
 - No threshold was chosen on the `report` half for either experiment (the
   deep-dive's PQ-vs-threshold figure uses the `tune` half only).
 - Nothing from `data/` or `outputs/` was committed except split CSVs,
