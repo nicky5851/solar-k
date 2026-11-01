@@ -1,0 +1,149 @@
+% =============================================================================
+% COPYRIGHT AND DISCLAIMER
+% =============================================================================
+% This file is provided as a convenience template for competition participants.
+% By using it, you accept full responsibility for compliance with all applicable
+% copyright, licensing, and usage rules of the Association for Computing
+% Machinery (ACM) and of any LaTeX packages you load (including, without
+% limitation, the "acmart" document class and related ACM materials).
+%
+% Consult ACM's official publication, template, and copyright policies before
+% using this setup for any purpose other than this competition. Do not assume
+% that this template may be reused, redistributed, or submitted elsewhere
+% without independently verifying ACM's current rules.
+%
+% Use of the "acmart" class, the "sigconf" option, or ACM-style formatting in
+% this template does NOT mean that this report, this competition, its organizers,
+% or any resulting PDF is sponsored, endorsed, affiliated with, or published by
+% ACM. ACM trademarks and branding remain the property of ACM.
+%
+% Template packages live in preamble.tex.
+% Citations live in main.bib. Edit this file with your paper content.
+% =============================================================================
+
+\documentclass[sigconf]{acmart}
+\input{preamble}
+
+% Guide styling: \guideStyletrue = show gray italic hints; \guideStylefalse = omit them
+\guideStyletrue
+% \guideStylefalse
+
+\begin{document}
+
+\title{\guide{Your Title Here}}  % Replace this with your title
+\subtitle{A Solution to the Solar Filament Segmentation Challenge 2026} % DO NOT CHANGE
+
+
+\author{\guide{Firstname Lastname}} 
+\affiliation{%
+  \institution{\guide{Your Institution}}  % <- Optional (remove if you are not currently affiliated with any institute)
+  \city{\guide{City}}
+  \country{\guide{Country}}
+}
+\email{first.author@example.com}   % <- Replace with your own email 
+
+% \author{\guide{Second Author}}
+% \affiliation{%
+%   \institution{\guide{Your Institution}}  % <- Optional (remove if you are not currently affiliated with any institute)
+%   \city{\guide{City}}
+%   \country{\guide{Country}}
+% }
+% \email{second.author@example.com}  % <- Replace with your own email
+
+\begin{abstract}
+    This report describes our solution to the Solar Filament Segmentation Challenge~2026, a Kaggle competition on automatic segmentation of solar filaments in GONG H-$\alpha$ observations. \guide{Continue the abstract with the details of your work.}
+\end{abstract}
+
+\maketitle
+
+\ifguideStyle
+\noindent{\color{gray!65}\itshape
+Guide mode is on.}
+\par\medskip
+\fi
+
+\guide{Please limit your report to four (4) pages, excluding the Acknowledgment and References sections. Throughout this document, please follow these considerations: 
+\begin{itemize}
+    \item Do not alter any text that is currently in black color (except for the emails under authors' name).
+    \item Replace all gray text with your own.
+    \item When you are done with the report, please replace \texttt{\textbackslash guideStyletrue} with \texttt{\textbackslash guideStylefalse}, to remove any gray text. Alternatively, you can remove any text wrapped in \texttt{\textbackslash guide\{\}},
+    \item Be as succinct as possible, and only provide details regarding your own work. For example, there is no need to discuss what solar filaments are, or why filament segmentation matters.
+    \item If you must, you can add extra sections.
+\end{itemize}}
+
+
+% ==================================== %
+%              INTRODUCTION            %
+% ==================================== %
+\section{Introduction}
+    This report goes over the details of our submitted solution to the Solar Filament Segmentation Challenge~2026 \cite{filament-segmentation-2026}. The challenge, launched on July~10,~2026, is organized by the Earth-Space AI Research (ESAIR) Lab\footnote{\href{https://www.esairlab.com/home}{www.esairlab.com/}}. This challenge utilizes the MAGFiLO dataset for evaluation of the segmentation algorithms \cite{ahmadzadeh2024dataset}. \guide{Continue with your own text; you really do not need a long introduction section.}
+
+
+% ==================================== %
+%              METHODOLOGY             %
+% ==================================== %
+\section{Methodology}\label{sec:methodology}
+    \guide{Explain your methodology, ensuring that the following items are included:
+    \begin{itemize}
+        \item (for novel algorithms) a detailed description of the algorithm introduced for segmentation,
+        \item (for existing algorithms) a quick review of the algorithm used for segmentation, and appropriate citation(s),
+        \item a detailed description of the end-to-end data pipeline, including pre-processing and post-processing,
+        \item (for ML models) a detailed description of any sampling strategy including train-val-test splits,
+        \item a graphic illustrating the entire data pipeline,
+        \item one or more graphics showing a few examples of the segmentations.
+    \end{itemize}}
+
+\subsection{Dataset}\label{sec:dataset}
+    The training set has 707 grayscale JPEG images and the test set 180, all $2048\times2048$, uint8, single-channel, 702~MB on disk in total. A SHA-256 check found zero exact duplicates within the train set, within the test set, or between the two.
+
+    Annotations are provided as a COCO-style JSON file. Its 1154 \texttt{images} entries map to only 707 unique physical train files: one entry per annotator of the same image (411 images with one annotator, 145 with two, 151 with three). The file contains 8199 instance (polygon) annotations across three categories that are actually used -- Right (2590), Unidentifiable (3074), and Left (2535) -- with a fourth category, Ambiguous, defined but unused. Instances are small and elongated: median area 1230~px\textsuperscript{2} (IQR 670--2440), median elongation (skeleton length / $\sqrt{\text{area}}$) 3.75, and a median minimum width of 2~px. Among a single annotator's own instances on the same image, 0.5\% touch or overlap a neighbour.
+
+    Where an image has two or three annotators (296 images, 1196 directed pairwise comparisons), we computed an inter-annotator agreement reference using the competition's own PQ/IoU-matching rule: global PQ $=0.3399$ (SQ $=0.6337$, RQ $=0.5364$; TP$=4292$, FP$=3709$, FN$=3709$). Matched-pair IoU has mean 0.634 (std 0.077), and the disagreement is dominated by instance-identity mismatches rather than boundary quality: 253 one-to-many and 253 many-to-one instance correspondences, plus 2840 unmatched instances with no IoU-$>0.5$ counterpart.
+
+    We split the 707 training images into 5 folds grouped by \emph{observation day} (not by the JSON's \texttt{image\_id}, so that different annotators of the same physical image always stay in the same fold), approximately balanced by image count and by observing site; the automated split check reported no violations.
+
+\subsection{Preprocessing}\label{sec:preprocessing}
+    Each image is first registered to the solar disk: an Otsu threshold followed by the largest connected component gives a disk centre and radius ($\text{radius}=\sqrt{\text{area}/\pi}$; mean fitted radius 905~px across the training set). We then correct limb darkening by dividing the image by its own per-image radial median-intensity profile, computed in 100 radial bins restricted to disk pixels and linearly interpolated across any sparsely populated bins; a numerical floor (10\% of the profile's 5th percentile) prevents the ratio from blowing up near faint edge bins. The limb-corrected image is then percentile-clipped (1st/99th percentile, computed over disk pixels only) and rescaled to $[0,1]$; pixels outside the fitted disk are set to 0. This deterministic pipeline is applied once per physical image, and its float32 output is cached to disk at float16 precision together with the fitted disk parameters, so repeated reads during tuning and training do not repeat the fit or the correction.
+
+    For semantic-segmentation training targets, each physical image's annotators are first rasterised into per-annotator binary masks (the union of that annotator's own instances); the training target is then the per-pixel \emph{fraction} of annotators marking that pixel, so a single-annotator image yields a binary target and a multi-annotator image yields a soft target reflecting annotator (dis)agreement. Per-annotator instance masks are kept separately for evaluation rather than folded into this target.
+
+% ==================================== %
+%              EVALUATION              %
+% ==================================== %
+\section{Evaluation}\label{sec:evaluation}
+    \guide{Explain your evaluation. This includes:
+    \begin{itemize}
+        \item the evaluation strategy,
+        \item plots and/or tables showing the performance of the segmentation algorithm (please include error bars and uncertainty measures whenever possible),
+        \item strengths and weaknesses of the proposed algorithm, and possible strategies for improvement.
+    \end{itemize}}
+
+    \begin{table}[h]
+      \caption{Results placeholder -- pending E002 Kaggle run.}
+      \label{tab:results}
+      \begin{tabular}{lccccl}
+        \toprule
+        Experiment & PQ & SQ & RQ & Kaggle LB & Notes \\
+        \midrule
+        Inter-annotator ref. & 0.3399 & 0.6337 & 0.5364 & -- & human ceiling, from Sec.~\ref{sec:dataset} \\
+        E001 (classical) & & & & & \\
+        E002 (U-Net) & & & & & \\
+        \bottomrule
+      \end{tabular}
+    \end{table}
+
+% ==================================== %
+%            ACKNOWLEDGMENT            %
+% ==================================== %
+\section{Acknowledgment}\label{sec:acknowledgment}
+    % Do not change
+    The organization of the Filament Segmentation Challenge 2026 is partially supported by the U.S. National Science Foundation (NSF) under Grant No. 2209912 and 2433781, directorate for Computer and Information Science and Engineering (CSE), and Office of Advanced Cyberinfrastructure (OAC), and Grant No. 2511630, AST Division Of Astronomical Sciences and MPS Directorate for Mathematical and Physical Sciences.
+
+    The Filament Segmentation Challenge 2026 is sponsored by the U.S. National Science Foundation (NSF) National Solar Observatory (NSO). 
+
+    This work utilizes GONG data obtained by the NSO Integrated Synoptic Program, managed by the National Solar Observatory, which is operated by the Association of Universities for Research in Astronomy (AURA), Inc. under a cooperative agreement with the National Science Foundation and with contribution from the National Oceanic and Atmospheric Administration. The GONG network of instruments is hosted by the Big Bear Solar Observatory, High Altitude Observatory, Learmonth Solar Observatory, Udaipur Solar Observatory, Instituto de Astrofísica de Canarias, and Cerro Tololo Interamerican Observatory.
+
+\bibliographystyle{ACM-Reference-Format}
+\bibliography{main}
+
+\end{document}
