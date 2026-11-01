@@ -20,10 +20,11 @@ from torch.utils.data import Dataset
 from . import ids as skids
 from . import io as skio
 from . import preprocess as skpre
+from . import sampler as sksamp
 from . import targets as sktgt
 
 CROP_SIZE = 512
-CENTERED_FRACTION = 2 / 3
+CENTERED_FRACTION = 2 / 3  # kept for reference; see sampler.DEFAULT_MIX
 
 
 class SolarCropDataset(Dataset):
@@ -36,6 +37,7 @@ class SolarCropDataset(Dataset):
         length: int | None = None,
         seed: int = 42,
         augment: bool = True,
+        sampler: sksamp.CropCenterSampler | None = None,
     ):
         if not stems:
             raise ValueError("SolarCropDataset needs at least one stem")
@@ -46,6 +48,7 @@ class SolarCropDataset(Dataset):
         self.length = length or len(stems) * 20
         self.augment = augment
         self.rng = random.Random(seed)
+        self.sampler = sampler or sksamp.CropCenterSampler()
         self._train_paths = {p.stem: p for p in skio.iter_train_images()}
 
     def __len__(self) -> int:
@@ -61,14 +64,6 @@ class SolarCropDataset(Dataset):
             anns_by_annotator[annotator] = self.anns_by_image_id.get(e["id"], [])
         target = sktgt.soft_consensus_target(anns_by_annotator, processed.shape[0], processed.shape[1])
         return processed, target
-
-    def _pick_center(self, target: np.ndarray, h: int, w: int) -> tuple[int, int]:
-        if self.rng.random() < CENTERED_FRACTION:
-            ys, xs = np.nonzero(target > 0)
-            if len(ys):
-                idx = self.rng.randrange(len(ys))
-                return int(ys[idx]), int(xs[idx])
-        return self.rng.randrange(h), self.rng.randrange(w)
 
     def _crop(self, arr: np.ndarray, cy: int, cx: int) -> np.ndarray:
         h, w = arr.shape
@@ -97,7 +92,7 @@ class SolarCropDataset(Dataset):
         stem = self.stems[self.rng.randrange(len(self.stems))]
         processed, target = self._load_image_and_target(stem)
         h, w = processed.shape
-        cy, cx = self._pick_center(target, h, w)
+        cy, cx = self.sampler.pick_center(stem, target, h, w, self.rng)
         img_crop = self._crop(processed, cy, cx)
         tgt_crop = self._crop(target, cy, cx)
         if img_crop.shape != (self.crop_size, self.crop_size):

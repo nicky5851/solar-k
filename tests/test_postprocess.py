@@ -126,3 +126,50 @@ def test_extract_instances_sparse_caps_to_largest_by_area():
     sparse = pp.extract_instances_sparse(binary, min_area=1, max_instances=1)
     assert sparse.shape[0] == 1
     assert int(sparse.sum()) == 4  # kept the 2x2 blob, not a lone pixel
+
+
+def test_regrow_instances_empty_seeds_returns_empty_list():
+    probs = np.zeros((20, 20), dtype=np.float32)
+    assert pp.regrow_instances(probs, [], t_mask=0.3, d=4) == []
+
+
+def test_regrow_instances_grows_single_seed_toward_lower_threshold():
+    probs = np.zeros((20, 20), dtype=np.float32)
+    probs[10, 10] = 0.9  # a single confident seed pixel
+    probs[10, 11] = 0.4  # neighbour just above t_mask, below t_det
+    probs[10, 9] = 0.1  # neighbour below t_mask -- should not be grown into
+    seed = np.zeros((20, 20), dtype=np.uint8)
+    seed[10, 10] = 1
+
+    grown = pp.regrow_instances(probs, [seed], t_mask=0.3, d=2)
+    assert len(grown) == 1
+    assert grown[0][10, 10] == 1
+    assert grown[0][10, 11] == 1  # grown in: above t_mask, within d
+    assert grown[0][10, 9] == 0  # not grown in: below t_mask
+
+
+def test_regrow_instances_respects_geodesic_distance_cap():
+    probs = np.full((40, 40), 0.9, dtype=np.float32)  # whole image above t_mask
+    seed = np.zeros((40, 40), dtype=np.uint8)
+    seed[20, 20] = 1
+
+    grown = pp.regrow_instances(probs, [seed], t_mask=0.3, d=3)
+    ys, xs = np.nonzero(grown[0])
+    # every grown pixel stays within the seed's d-pixel dilated footprint
+    assert np.all(np.abs(ys - 20) <= 3) and np.all(np.abs(xs - 20) <= 3)
+    # and it did grow beyond the single seed pixel
+    assert len(ys) > 1
+
+
+def test_regrow_instances_does_not_merge_adjacent_instances():
+    probs = np.full((20, 20), 0.9, dtype=np.float32)  # everything eligible to grow
+    seed_a = np.zeros((20, 20), dtype=np.uint8)
+    seed_a[5, 5] = 1
+    seed_b = np.zeros((20, 20), dtype=np.uint8)
+    seed_b[5, 10] = 1  # close enough that a naive independent dilation by d=4 would overlap
+
+    grown = pp.regrow_instances(probs, [seed_a, seed_b], t_mask=0.3, d=4)
+    assert len(grown) == 2
+    overlap = grown[0].astype(bool) & grown[1].astype(bool)
+    assert not overlap.any()  # exclusive masks: no pixel claimed by both
+    assert grown[0][5, 5] == 1 and grown[1][5, 10] == 1  # each still contains its own seed

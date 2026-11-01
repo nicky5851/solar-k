@@ -26,10 +26,27 @@ PACKAGE_DATASET = f"{KAGGLE_USER}/solar-k-package"
 COMPETITION = "filament-segmentation-2026"
 
 SETUP_SOURCE = """import os
+import time
 
 # On this Kaggle layout, attached sources are nested under /kaggle/input/datasets/
 # and /kaggle/input/competitions/ (not flat /kaggle/input/<slug>/).
 PKG_DIR = '/kaggle/input/datasets/potcharapanchumrak/solar-k-package'
+
+# Kaggle has shown intermittent FileNotFoundError here even though the
+# dataset_sources attachment is correctly registered (confirmed via
+# `kaggle kernels pull -m`) -- a short wait costs little and occasionally
+# helps, but a 120s wait was tried and the mount still never appeared, so
+# this doesn't retry long: fail fast and let the external push-retry loop
+# (scripts/gen_e004_kaggle_artifacts.py's caller) try a fresh session
+# instead of burning GPU minutes on a wait that isn't fixing it.
+for attempt in range(10):
+    if os.path.isdir(PKG_DIR):
+        break
+    print(f'{PKG_DIR} not mounted yet, waiting (attempt {attempt + 1}/10)...')
+    time.sleep(3)
+else:
+    raise FileNotFoundError(f'{PKG_DIR} never appeared after 30s -- check the dataset is attached')
+
 os.chdir(PKG_DIR)
 print(os.listdir('.'))"""
 

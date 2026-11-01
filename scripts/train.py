@@ -47,6 +47,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from solar_k import dataset as skds
 from solar_k import io as skio
 from solar_k import preprocess as skpre
+from solar_k import sampler as sksamp
 from solar_k import unet as sku
 
 
@@ -227,9 +228,24 @@ def main() -> None:
         print(f"Preprocessing cache: built {n_built}/{len(stems_with_paths)} new entries in {time.time() - t0:.1f}s")
 
     num_workers = cfg.get("num_workers", 0)
+
+    # CODING_SPEC_04_MODEL_SIDE.md E006: hard-negative-centred crops, mixed in
+    # via an explicit sampler_mix config. Absent -> sampler.DEFAULT_MIX, which
+    # reproduces E002/E004's fixed 2/3 positive, 1/3 random split exactly.
+    sampler_mix = cfg.get("sampler_mix")
+    crop_sampler = None
+    if sampler_mix:
+        hard_negatives_csv = cfg.get("hard_negatives_csv")
+        hard_negatives_by_stem = {}
+        if hard_negatives_csv:
+            hard_negatives_by_stem = sksamp.load_hard_negatives(Path(hard_negatives_csv), fold_stems=set(train_stems))
+            print(f"Loaded hard negatives for {len(hard_negatives_by_stem)}/{len(train_stems)} training stems")
+        crop_sampler = sksamp.CropCenterSampler(mix=sampler_mix, hard_negatives_by_stem=hard_negatives_by_stem)
+
     train_ds = skds.SolarCropDataset(
         train_stems, images_by_file, anns_by_image_id,
         crop_size=cfg.get("crop_size", 512), length=cfg.get("dataset_length"), seed=cfg.get("seed", 42),
+        sampler=crop_sampler,
     )
     loader = DataLoader(
         train_ds, batch_size=cfg.get("batch_size", 8), shuffle=True, num_workers=num_workers,

@@ -1,0 +1,50 @@
+experiment_id: E006-f0
+description: >
+  CODING_SPEC_04_MODEL_SIDE.md E006, fold 0: hard-negative mining. Identical
+  recipe to E004-f0 (resnet34/imagenet, EMA 0.999, PQ-based checkpoint
+  selection, 4000 iterations) -- the *only* change is the crop sampler mix,
+  via sampler_mix + hard_negatives_csv below, isolating this one variable
+  (same reason E007 keeps E004's plain sampler rather than also switching to
+  this mix). Hypothesis: confident FPs on bright plage/network regions
+  persist because 512px crops rarely show those regions; training on crops
+  centred on cataloged isolated-class FPs (scripts/build_hard_negatives.py)
+  should teach the model to suppress them. Compared to E004-f0 on the same
+  fold via scripts/run_e007_eval.py's raw+full postprocess paths (decision
+  rule: kept only if full PQ improves by >= 0.02 on fold 0 AND fold 1,
+  without SQ falling).
+seed: 42
+fold: 0
+device: auto
+encoder_name: resnet34
+crop_size: 512
+batch_size: 8
+dataset_length: null
+total_iterations: 4000
+warmup_steps: 300
+lr: 0.0003
+weight_decay: 0.0001
+checkpoint_every: 1000
+log_every: 100
+amp: true
+ema_decay: 0.999
+checkpoint_select_by: pq
+n_pq_val_images: 40
+num_workers: 4
+cache_workers: 4
+prebuild_cache: true
+save_oof_and_test_probs: true
+infer_tile_size: 1024
+infer_overlap: 128
+checkpoint_postprocess:
+  mode: threshold
+  t: 0.7
+  closing_radius: 2
+  min_area: 418
+# E006's one change vs E004: 45% positive-centred, 30% hard-negative-centred
+# (+-128px jitter, data/interim/hard_negatives_v1.csv filtered to this fold's
+# training stems by scripts/train.py), 25% random -- CODING_SPEC_04's mix.
+sampler_mix:
+  positive: 0.45
+  hard_negative: 0.30
+  random: 0.25
+hard_negatives_csv: data/interim/hard_negatives_v1.csv

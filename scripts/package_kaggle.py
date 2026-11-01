@@ -17,7 +17,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from solar_k import io as skio
 
 REPO_ROOT = skio.repo_root()
-INCLUDE = ["src", "scripts", "configs", "requirements.txt", "data/splits/folds_v1.csv"]
+INCLUDE = [
+    "src", "scripts", "configs", "requirements.txt", "data/splits/folds_v1.csv",
+    "data/interim/hard_negatives_v1.csv",  # E006 (CODING_SPEC_04_MODEL_SIDE.md); harmless if absent
+]
 EXCLUDE_SUFFIXES = {".pyc"}
 EXCLUDE_DIR_NAMES = {"__pycache__", ".pytest_cache", ".DS_Store"}
 

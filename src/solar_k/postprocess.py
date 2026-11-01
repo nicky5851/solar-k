@@ -13,6 +13,7 @@ import cv2
 import numpy as np
 import scipy.sparse as sp
 from skimage.filters import apply_hysteresis_threshold
+from skimage.segmentation import watershed
 
 
 @dataclass
@@ -114,3 +115,35 @@ def postprocess_sparse(probs: np.ndarray, cfg: PostprocessConfig) -> sp.csr_matr
     binary = probs_to_binary(probs, cfg)
     closed = morphological_close(binary, cfg.closing_radius)
     return extract_instances_sparse(closed, cfg.min_area, max_instances=cfg.max_instances)
+
+
+def regrow_instances(probs: np.ndarray, seed_masks: list[np.ndarray], t_mask: float, d: int) -> list[np.ndarray]:
+    """Two-stage mask extent fix (CODING_SPEC_04_MODEL_SIDE.md E008).
+
+    `seed_masks` are the final kept instances from the normal detect+scorer
+    pipeline (one mask decides *whether* an instance exists); this re-grows
+    each one's *extent* out to a lower threshold `t_mask`, capped to within a
+    `d`-pixel dilation of its seed. A marker-controlled watershed (markers =
+    seed instance ids, elevation = -probs, flood region = each seed's
+    d-pixel-dilated footprint intersected with probs >= t_mask) assigns every
+    candidate pixel to at most one instance, so regrown masks never merge or
+    overlap -- unlike dilating each seed independently.
+    """
+    if not seed_masks:
+        return []
+    h, w = probs.shape
+    n = len(seed_masks)
+    markers = np.zeros((h, w), dtype=np.int32)
+    for i, m in enumerate(seed_masks, start=1):
+        markers[m.astype(bool)] = i
+
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * d + 1, 2 * d + 1)) if d > 0 else None
+    allowed = np.zeros((h, w), dtype=bool)
+    for m in seed_masks:
+        m_u8 = m.astype(np.uint8)
+        dil = cv2.dilate(m_u8, kernel).astype(bool) if d > 0 else m_u8.astype(bool)
+        allowed |= dil
+
+    region = allowed & ((probs >= t_mask) | (markers > 0))
+    labels_grown = watershed(-probs, markers=markers, mask=region)
+    return [(labels_grown == i).astype(np.uint8) for i in range(1, n + 1)]
