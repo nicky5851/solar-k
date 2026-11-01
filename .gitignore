@@ -59,3 +59,20 @@ venv/
 .DS_Store
 .vscode/
 .idea/
+
+# ---- Local planning docs (still read from disk) ----
+*.md
+!README.md
+!**/README.md
+docs/
+
+# ---- Paper (Overleaf template, tracked) ----
+!reports/paper/**
+reports/paper/**/*.aux
+reports/paper/**/*.log
+reports/paper/**/*.out
+reports/paper/**/*.synctex.gz
+reports/paper/**/*.fdb_latexmk
+reports/paper/**/*.fls
+reports/paper/**/*.bbl
+reports/paper/**/*.blg
