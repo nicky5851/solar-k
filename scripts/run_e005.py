@@ -38,6 +38,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import scipy.sparse as sp
 from sklearn.model_selection import GroupKFold
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -56,8 +57,31 @@ from run_e002_eval import build_gt_for_stem, load_annotation_index, load_prob_pn
 from run_e003 import ComponentCache, build_component_cache, evaluate_filtered, summary_row
 
 REPO_ROOT = skio.repo_root()
+H = W = 2048
 C_GRID = [round(x, 3) for x in np.arange(0.0, 0.525, 0.025)]
 N_CV_FOLDS = 5
+
+
+def _gt_to_sparse(gt_by_annotator: dict) -> dict:
+    """CLAUDE.md requires streaming on this 8GB Mac: a dense (n, H, W)
+    instance-mask stack per annotator, held for every one of ~565 images at
+    once, is tens of GB. Filament coverage is a tiny fraction of 2048x2048,
+    so converting to (n, H*W) sparse CSR up front and reconstructing dense
+    only transiently per-stem (see `_gt_to_dense`) keeps the persistent
+    cache under ~20MB total."""
+    out = {}
+    for a, masks in gt_by_annotator.items():
+        n = masks.shape[0]
+        out[a] = sp.csr_matrix(masks.reshape(n, -1)) if n else sp.csr_matrix((0, H * W), dtype=np.uint8)
+    return out
+
+
+def _gt_to_dense(gt_sparse: dict) -> dict:
+    out = {}
+    for a, csr in gt_sparse.items():
+        n = csr.shape[0]
+        out[a] = np.asarray(csr.todense()).reshape(n, H, W).astype(np.uint8) if n else np.zeros((0, H, W), dtype=np.uint8)
+    return out
 
 
 def load_available_fold_dirs(kind: str) -> dict[int, Path]:
@@ -107,7 +131,7 @@ def main() -> None:
     instance_stats = pd.read_csv(REPO_ROOT / "data" / "interim" / "instance_stats.csv")
     quartile_edges = instance_stats["area"].quantile([0.25, 0.5, 0.75]).tolist()
 
-    gt_by_stem, disk_info_by_stem, site_by_stem, day_by_stem = {}, {}, {}, {}
+    gt_sparse_by_stem, disk_info_by_stem, site_by_stem, day_by_stem = {}, {}, {}, {}
     cache_by_stem: dict[str, ComponentCache] = {}
     for fold in available_folds:
         fold_rows = folds_df[folds_df["fold"] == fold]
@@ -121,9 +145,10 @@ def main() -> None:
             disk_info_by_stem[stem] = disk_info
             site_by_stem[stem] = row["site"]
             day_by_stem[stem] = row["date"]
-            gt_by_stem[stem] = build_gt_for_stem(stem, images_by_file, anns_by_image_id)
-            cache_by_stem[stem] = build_component_cache(stem, probs, processed, disk_info, cfg_components, gt_by_stem[stem])
-            del processed
+            gt_dense = build_gt_for_stem(stem, images_by_file, anns_by_image_id)
+            gt_sparse_by_stem[stem] = _gt_to_sparse(gt_dense)
+            cache_by_stem[stem] = build_component_cache(stem, probs, processed, disk_info, cfg_components, gt_dense)
+            del processed, gt_dense, probs
 
     all_stems = sorted(cache_by_stem)
     print(f"{len(all_stems)} images with local OOF across {len(available_folds)} fold(s)")
@@ -149,13 +174,15 @@ def main() -> None:
             else:
                 keep = step1_shape_keep(df) & (sksc.keep_score(scorer, df) > c)
             pred_sparse = cache.sparse[keep] if len(df) else cache.sparse
-            for annotator, gt_masks in gt_by_stem[stem].items():
+            gt_dense = _gt_to_dense(gt_sparse_by_stem[stem])
+            for annotator, gt_masks in gt_dense.items():
                 r = skeval.evaluate_annotator_image(
                     stem, annotator, pred_sparse, gt_masks,
                     disk_info=disk_info_by_stem.get(stem), site=site_by_stem.get(stem),
                     compute_pixel_metrics=compute_pixel_metrics,
                 )
                 results.append(r)
+            del gt_dense
         return skeval.aggregate_evaluation(results, quartile_edges=quartile_edges, noisy_stems=set())
 
     cv_rows = []

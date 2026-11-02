@@ -12,19 +12,23 @@ threshold, and an SQ ceiling estimate. Three parts:
 
 2. Area-ratio / boundary-offset diagnosis: on every fold's OOF (whichever of
    outputs/E004-f{0..4}/oof exist locally -- re-run this once more folds are
-   synced), apply E003's chosen postprocessing (best_cfg1 + shape gate, no
-   scorer -- the scorer's job is recognition, not extent) and match kept
-   instances to GT at IoU > 0.5. For matched (TP) pairs, record area_ratio
-   (pred/gt) and a signed boundary offset (median value of the GT's signed
-   distance transform sampled at the predicted mask's boundary pixels --
-   positive means the predicted boundary sits outside the GT, i.e. the mask
-   extends past the true filament; negative means it's inside, i.e. thin).
+   synced), apply E003's chosen postprocessing (best_cfg1 + shape gate) plus
+   the scorer cutoff, and match kept instances to GT at IoU > 0.5. For
+   matched (TP) pairs, record area_ratio (pred/gt) and a signed boundary
+   offset (median value of the GT's signed distance transform sampled at the
+   predicted mask's boundary pixels -- positive means the predicted boundary
+   sits outside the GT, negative means it's inside, i.e. the mask is thin).
 
-3. Two-stage re-growing grid search: using those same TP seed instances (now
-   from the *scorer-gated* step-3 pipeline, not just shape-gated) and
+3. Two-stage re-growing grid search: using those same seed instances and
    postprocess.regrow_instances, grid-search t_mask x d on `tune`, report on
-   `report` -- CODING_SPEC_03_FP_AND_FOLDS.md's leakage-safe split, reused
-   so this isn't tuned on data it's scored against.
+   `report` -- CODING_SPEC_03_FP_AND_FOLDS.md's leakage-safe split.
+
+Memory: this repo's CLAUDE.md requires streaming one image at a time on this
+8GB Mac. Every per-image array (probability map, GT instance-mask stack,
+seed masks) is loaded, used, and discarded within a single stem's loop
+iteration -- nothing holds all ~565 images' worth of dense arrays at once.
+Only lightweight accumulators (floats, counts, small AnnotatorImageResult
+objects) persist across the whole run.
 
 Writes data/interim/E008_area_boundary.csv (per-TP-pair rows), data/interim/
 E008_regrow_grid.csv, and data/interim/E008_eval_summary.json (SQ ceiling,
@@ -34,11 +38,13 @@ Usage: python scripts/run_e008.py
 """
 from __future__ import annotations
 
+import gc
 import json
 import sys
 import time
 from pathlib import Path
 
+import cv2
 import numpy as np
 import pandas as pd
 import scipy.sparse as sp
@@ -67,8 +73,10 @@ D_GRID = [2, 4, 8]
 
 
 def sq_ceiling(images_by_file, anns_by_image_id) -> dict:
-    """Part 1: annotator-vs-consensus-of-others SQ, over every multi-annotator
-    training image (no model, no probability maps involved)."""
+    """Part 1: annotator-vs-consensus-of-others SQ. Streams one image at a
+    time -- GT instance stacks are small (a handful of filaments), so this
+    part was never the memory risk, but it's written the same way for
+    consistency."""
     matches = []
     n_images = 0
     for file_name, entries in images_by_file.items():
@@ -94,7 +102,7 @@ def sq_ceiling(images_by_file, anns_by_image_id) -> dict:
 
     result = skmetric.aggregate_matches(matches)
     print(f"SQ ceiling: {n_images} multi-annotator images, {len(matches)} annotator-vs-others comparisons, "
-          f"TP={result.tp} FP={result.fp} FN={result.fn}, SQ_ceiling={result.sq:.4f}")
+          f"TP={result.tp} FP={result.fp} FN={result.fn}, SQ_ceiling={result.sq:.4f}", flush=True)
     return {"n_multi_annotator_images": n_images, "n_comparisons": len(matches),
             "tp": result.tp, "fp": result.fp, "fn": result.fn, "sq_ceiling": result.sq}
 
@@ -109,12 +117,18 @@ def signed_boundary_offset(pred_mask: np.ndarray, gt_mask: np.ndarray) -> float:
     signed = np.where(gt_bool, -dist_in, dist_out)
 
     pred_u8 = pred_mask.astype(np.uint8)
-    import cv2
     eroded = cv2.erode(pred_u8, np.ones((3, 3), np.uint8))
     boundary = (pred_u8 - eroded).astype(bool)
     if not boundary.any():
         boundary = pred_u8.astype(bool)
     return float(np.median(signed[boundary]))
+
+
+def _stack_to_sparse(masks: list[np.ndarray]):
+    if not masks:
+        return sp.csr_matrix((0, H * W), dtype=np.uint8)
+    flat = np.stack([m.reshape(-1) for m in masks])
+    return sp.csr_matrix(flat)
 
 
 def main() -> None:
@@ -143,8 +157,11 @@ def main() -> None:
     folds_df = pd.read_csv(skio.data_root() / "splits" / "folds_v1.csv")
     train_paths = {p.stem: p for p in skio.iter_train_images()}
 
-    gt_by_stem, disk_info_by_stem, day_by_stem, site_by_stem = {}, {}, {}, {}
-    probs_by_stem: dict[str, np.ndarray] = {}
+    # Only lightweight per-stem metadata is kept for the whole run -- no
+    # probability maps, no mask stacks. oof_path_by_stem/day_by_stem/
+    # site_by_stem are all just a Path or a short string per image.
+    oof_path_by_stem: dict[str, Path] = {}
+    day_by_stem, site_by_stem = {}, {}
     available_folds = []
     for fold in range(5):
         oof_dir = skio.output_root() / f"E004-f{fold}" / "oof"
@@ -158,44 +175,49 @@ def main() -> None:
             png = oof_dir / f"{stem}.png"
             if not png.exists():
                 continue
-            probs_by_stem[stem] = load_prob_png(png)
-            _, disk_info = skpre.load_or_build(stem, train_paths[stem])
-            disk_info_by_stem[stem] = disk_info
+            oof_path_by_stem[stem] = png
             site_by_stem[stem] = row["site"]
             day_by_stem[stem] = row["date"]
-            gt_by_stem[stem] = build_gt_for_stem(stem, images_by_file, anns_by_image_id)
-    print(f"Folds available locally: {available_folds} ({len(probs_by_stem)} images total)")
+    print(f"Folds available locally: {available_folds} ({len(oof_path_by_stem)} images total)", flush=True)
 
     tune_stems, report_stems = sktune.split_tune_report(day_by_stem, seed=0)
-    tune_stems = sorted(s for s in tune_stems if s in probs_by_stem)
-    report_stems = sorted(s for s in report_stems if s in probs_by_stem)
-    all_stems = tune_stems + report_stems
-    print(f"Tune: {len(tune_stems)} images, Report: {len(report_stems)} images")
+    tune_stems = set(s for s in tune_stems if s in oof_path_by_stem)
+    report_stems = set(s for s in report_stems if s in oof_path_by_stem)
+    all_stems = sorted(tune_stems | report_stems)
+    print(f"Tune: {len(tune_stems)} images, Report: {len(report_stems)} images", flush=True)
 
-    # --- Part 2: area ratio / boundary offset on TP pairs, step-3 pipeline --
+    instance_stats_path = REPO_ROOT / "data" / "interim" / "instance_stats.csv"
+    quartile_edges = pd.read_csv(instance_stats_path)["area"].quantile([0.25, 0.5, 0.75]).tolist() if instance_stats_path.exists() else None
+
+    grid_configs = [(t_mask, d) for t_mask in T_MASK_GRID if t_mask < cfg1.t for d in D_GRID]
+    tune_results_by_config: dict[tuple, list] = {cfg: [] for cfg in grid_configs}
+    baseline_results: list = []  # d=0 (no re-growing), every stem -- filtered to report_stems later
     ar_rows = []
-    seeds_by_stem: dict[str, list[np.ndarray]] = {}
-    for stem in all_stems:
-        probs = probs_by_stem[stem]
-        processed, _ = skpre.load_or_build(stem, train_paths[stem])
-        features, labels = skcomp.extract_components(stem, probs, processed, disk_info_by_stem[stem], cfg_components)
-        skcomp.label_components(features, labels, gt_by_stem[stem])
+
+    t0 = time.time()
+    for i, stem in enumerate(all_stems):
+        probs = load_prob_png(oof_path_by_stem[stem])
+        processed, disk_info = skpre.load_or_build(stem, train_paths[stem])
+        gt_by_annotator = build_gt_for_stem(stem, images_by_file, anns_by_image_id)
+
+        features, labels = skcomp.extract_components(stem, probs, processed, disk_info, cfg_components)
+        skcomp.label_components(features, labels, gt_by_annotator)
         df = skcomp.to_dataframe(features)
         if df.empty:
-            seeds_by_stem[stem] = []
-            del labels
-            continue
-        shape_keep = (df["area"] >= cfg1.min_area) & (df["elongation"].fillna(0) >= min_elong) & (df["length"].fillna(0) >= min_len)
-        score_keep = sksc.keep_score(scorer, df) > best_c
-        keep = (shape_keep & score_keep).to_numpy()
-        kept_df = df.loc[keep].reset_index(drop=True)
-        kept_labels = df.loc[keep, "label"].tolist()
-        seeds_by_stem[stem] = [(labels == lid).astype(np.uint8) for lid in kept_labels]
+            seeds = []
+        else:
+            shape_keep = (df["area"] >= cfg1.min_area) & (df["elongation"].fillna(0) >= min_elong) & (df["length"].fillna(0) >= min_len)
+            score_keep = sksc.keep_score(scorer, df) > best_c
+            keep = (shape_keep & score_keep).to_numpy()
+            kept_labels = df.loc[keep, "label"].tolist()
+            seeds = [(labels == lid).astype(np.uint8) for lid in kept_labels]
         del labels
+        del features
 
-        for i, mask in enumerate(seeds_by_stem[stem]):
+        # --- area ratio / boundary offset for this stem's TP seeds --------
+        for mask in seeds:
             best_iou, best_gt_mask = 0.0, None
-            for annotator, gt_masks in gt_by_stem[stem].items():
+            for gt_masks in gt_by_annotator.values():
                 if gt_masks.shape[0] == 0:
                     continue
                 iou, _ = skmetric.pairwise_iou_dice(gt_masks, mask[None, :, :])
@@ -207,51 +229,82 @@ def main() -> None:
                 boundary_offset = signed_boundary_offset(mask, best_gt_mask)
                 ar_rows.append({"stem": stem, "area_ratio": area_ratio, "boundary_offset_px": boundary_offset, "iou": best_iou})
 
+        # --- baseline (d=0, no re-growing) eval for this stem --------------
+        pred_sparse_baseline = _stack_to_sparse(seeds)
+        for annotator, gt_masks in gt_by_annotator.items():
+            baseline_results.append(skeval.evaluate_annotator_image(
+                stem, annotator, pred_sparse_baseline, gt_masks, disk_info=disk_info, site=site_by_stem.get(stem),
+                compute_pixel_metrics=(stem in report_stems),
+            ))
+
+        # --- grid search, tune stems only ----------------------------------
+        if stem in tune_stems and seeds:
+            for (t_mask, d) in grid_configs:
+                grown = skpp.regrow_instances(probs, seeds, t_mask=t_mask, d=d)
+                pred_sparse = _stack_to_sparse(grown)
+                for annotator, gt_masks in gt_by_annotator.items():
+                    tune_results_by_config[(t_mask, d)].append(
+                        skeval.evaluate_annotator_image(stem, annotator, pred_sparse, gt_masks, disk_info=disk_info, site=site_by_stem.get(stem))
+                    )
+                del grown, pred_sparse
+
+        del probs, processed, seeds, gt_by_annotator, pred_sparse_baseline
+        if (i + 1) % 25 == 0 or i + 1 == len(all_stems):
+            gc.collect()
+            print(f"  {i + 1}/{len(all_stems)} images done, elapsed {time.time() - t0:.1f}s", flush=True)
+
     ar_df = pd.DataFrame(ar_rows)
     ar_path = REPO_ROOT / "data" / "interim" / "E008_area_boundary.csv"
     ar_df.to_csv(ar_path, index=False)
     if len(ar_df):
         print(f"Area ratio: median={ar_df['area_ratio'].median():.3f} IQR=[{ar_df['area_ratio'].quantile(.25):.3f}, {ar_df['area_ratio'].quantile(.75):.3f}]")
         print(f"Boundary offset (px): median={ar_df['boundary_offset_px'].median():.2f} IQR=[{ar_df['boundary_offset_px'].quantile(.25):.2f}, {ar_df['boundary_offset_px'].quantile(.75):.2f}]")
-        print(f"(negative median => masks systematically thin, supporting the re-growing hypothesis)")
+        print("(negative median => masks systematically thin, supporting the re-growing hypothesis)")
     else:
         print("No TP pairs found for area/boundary diagnosis.")
 
-    # --- Part 3: two-stage re-growing grid search ---------------------------
-    quartile_edges_path = REPO_ROOT / "data" / "interim" / "instance_stats.csv"
-    quartile_edges = pd.read_csv(quartile_edges_path)["area"].quantile([0.25, 0.5, 0.75]).tolist() if quartile_edges_path.exists() else None
-
-    def evaluate_regrow(stems, t_mask: float, d: int, compute_pixel_metrics: bool = False) -> skeval.EvaluationSummary:
-        results = []
-        for stem in stems:
-            seeds = seeds_by_stem.get(stem, [])
-            grown = skpp.regrow_instances(probs_by_stem[stem], seeds, t_mask=t_mask, d=d) if seeds else []
-            pred_sparse = _stack_to_sparse(grown) if grown else sp.csr_matrix((0, H * W), dtype=np.uint8)
-            for annotator, gt_masks in gt_by_stem[stem].items():
-                r = skeval.evaluate_annotator_image(
-                    stem, annotator, pred_sparse, gt_masks,
-                    disk_info=disk_info_by_stem.get(stem), site=site_by_stem.get(stem),
-                    compute_pixel_metrics=compute_pixel_metrics,
-                )
-                results.append(r)
-        return skeval.aggregate_evaluation(results, quartile_edges=quartile_edges, noisy_stems=set())
-
-    t0 = time.time()
+    # --- pick best (t_mask, d) on tune, report its + baseline's report-half numbers
     grid_rows = []
     best_t_mask, best_d, best_pq = cfg1.t, 0, -1.0
-    for t_mask in T_MASK_GRID:
-        if t_mask >= cfg1.t:
-            continue  # re-growing only makes sense below the detection threshold
-        for d in D_GRID:
-            s = evaluate_regrow(tune_stems, t_mask, d)
-            grid_rows.append({"t_mask": t_mask, "d": d, "pq": s.overall.pq, "sq": s.overall.sq, "rq": s.overall.rq})
-            if s.overall.pq > best_pq:
-                best_pq, best_t_mask, best_d = s.overall.pq, t_mask, d
+    for (t_mask, d), results in tune_results_by_config.items():
+        s = skeval.aggregate_evaluation(results, quartile_edges=quartile_edges, noisy_stems=set())
+        grid_rows.append({"t_mask": t_mask, "d": d, "pq": s.overall.pq, "sq": s.overall.sq, "rq": s.overall.rq})
+        if s.overall.pq > best_pq:
+            best_pq, best_t_mask, best_d = s.overall.pq, t_mask, d
     pd.DataFrame(grid_rows).to_csv(REPO_ROOT / "data" / "interim" / "E008_regrow_grid.csv", index=False)
-    print(f"Re-grow grid search done in {time.time() - t0:.1f}s. Best on tune: t_mask={best_t_mask}, d={best_d}, PQ={best_pq:.4f}")
+    print(f"Re-grow grid search: best on tune: t_mask={best_t_mask}, d={best_d}, PQ={best_pq:.4f}", flush=True)
+    del tune_results_by_config
 
-    baseline_report = evaluate_regrow(report_stems, cfg1.t, 0, compute_pixel_metrics=True)  # d=0 => no growth, same as step-4 seeds
-    grown_report = evaluate_regrow(report_stems, best_t_mask, best_d, compute_pixel_metrics=True)
+    baseline_report_results = [r for r in baseline_results if r.stem in report_stems]
+    baseline_report = skeval.aggregate_evaluation(baseline_report_results, quartile_edges=quartile_edges, noisy_stems=set())
+    del baseline_results
+
+    # One light extra pass over report_stems only, for the chosen config.
+    grown_report_results = []
+    for stem in sorted(report_stems):
+        probs = load_prob_png(oof_path_by_stem[stem])
+        processed, disk_info = skpre.load_or_build(stem, train_paths[stem])
+        gt_by_annotator = build_gt_for_stem(stem, images_by_file, anns_by_image_id)
+        features, labels = skcomp.extract_components(stem, probs, processed, disk_info, cfg_components)
+        skcomp.label_components(features, labels, gt_by_annotator)
+        df = skcomp.to_dataframe(features)
+        seeds = []
+        if not df.empty:
+            shape_keep = (df["area"] >= cfg1.min_area) & (df["elongation"].fillna(0) >= min_elong) & (df["length"].fillna(0) >= min_len)
+            score_keep = sksc.keep_score(scorer, df) > best_c
+            keep = (shape_keep & score_keep).to_numpy()
+            kept_labels = df.loc[keep, "label"].tolist()
+            seeds = [(labels == lid).astype(np.uint8) for lid in kept_labels]
+        del labels, features
+        grown = skpp.regrow_instances(probs, seeds, t_mask=best_t_mask, d=best_d) if seeds else []
+        pred_sparse = _stack_to_sparse(grown)
+        for annotator, gt_masks in gt_by_annotator.items():
+            grown_report_results.append(skeval.evaluate_annotator_image(
+                stem, annotator, pred_sparse, gt_masks, disk_info=disk_info, site=site_by_stem.get(stem), compute_pixel_metrics=True,
+            ))
+        del probs, processed, seeds, grown, pred_sparse, gt_by_annotator
+
+    grown_report = skeval.aggregate_evaluation(grown_report_results, quartile_edges=quartile_edges, noisy_stems=set())
 
     def row(s):
         o = s.overall
@@ -269,11 +322,6 @@ def main() -> None:
     (REPO_ROOT / "data" / "interim" / "E008_eval_summary.json").write_text(json.dumps(summary, indent=2))
     print(json.dumps(summary, indent=2))
     print(f"Done in {(time.time() - t_start) / 60:.1f} min")
-
-
-def _stack_to_sparse(masks: list[np.ndarray]):
-    flat = np.stack([m.reshape(-1) for m in masks])
-    return sp.csr_matrix(flat)
 
 
 if __name__ == "__main__":
