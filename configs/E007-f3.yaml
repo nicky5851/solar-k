@@ -1,0 +1,51 @@
+experiment_id: E007-f3
+description: >
+  CODING_SPEC_04_MODEL_SIDE.md E007, fold 3: same recipe as E004 (EMA 0.999,
+  PQ-based checkpoint selection every 1000 iters, same crop sampler/augment)
+  but a stronger encoder -- efficientnet-b4 (imagenet) instead of resnet34 --
+  to test whether richer features improve both recognition (fewer confident
+  FPs) and mask fidelity (filaments are 2-4px wide; a U-Net's stride-2 skip
+  from the first encoder stage is what preserves them, which is why this
+  isn't a ConvNeXt/Swin-style encoder -- those start at stride 4). 6000
+  iterations (not 4000): the 4090 is ~2-3x a T4, so this stays a similar
+  wall-clock budget to E004's 4000-iteration T4 runs. Trained on the RunPod
+  RTX 4090 (scripts/setup_remote.sh), not Kaggle -- compared to E004-f0 on
+  the same fold via scripts/run_e007_eval.py (raw + full postprocess paths,
+  tune/report split, per CODING_SPEC_04_MODEL_SIDE.md section 2's decision
+  rule: kept only if full PQ improves by >= 0.02 on fold 0 AND fold 1,
+  without SQ falling).
+# CODING_SPEC_05_ENSEMBLE.md E012: identical to E007-f0 except fold, so all 5 E007 folds are comparable.
+seed: 42
+fold: 3
+device: auto
+encoder_name: efficientnet-b4
+crop_size: 512
+batch_size: 8
+dataset_length: null
+total_iterations: 6000
+warmup_steps: 450
+lr: 0.0003
+weight_decay: 0.0001
+checkpoint_every: 1000
+log_every: 100
+amp: true
+ema_decay: 0.999
+checkpoint_select_by: pq
+n_pq_val_images: 40
+# RunPod pod CPU count is unknown ahead of time -- setup_remote.sh prints
+# nproc; raise these to match if the pod has more than 4 cores available.
+num_workers: 4
+cache_workers: 4
+prebuild_cache: true
+save_oof_and_test_probs: true
+infer_tile_size: 1024
+infer_overlap: 128
+# If efficientnet-b4 doesn't fit at batch 8/crop 512 with AMP on the pod's
+# GPU, CODING_SPEC_04_MODEL_SIDE.md's fallback is encoder_name: resnext50_32x4d
+# (keep everything else the same) -- record whichever was actually used in
+# experiments.csv's notes column.
+checkpoint_postprocess:
+  mode: threshold
+  t: 0.7
+  closing_radius: 2
+  min_area: 418

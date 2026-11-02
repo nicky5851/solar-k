@@ -63,3 +63,21 @@ def _box(h, w, box):
     r0, r1, c0, c1 = box
     m[r0 : r1 + 1, c0 : c1 + 1] = 1
     return m
+
+
+def test_grid_search_independent_of_stem_iteration_order():
+    """CODING_SPEC_05 determinism: grid_search must not depend on the
+    iteration order of the (set-typed) tune_stems it is given."""
+    rng = np.random.RandomState(0)
+    stems = [f"s{i}" for i in range(8)]
+    probs = {s: rng.rand(48, 48).astype(np.float32) for s in stems}
+    gt = {}
+    for s in stems:
+        m = (probs[s] > 0.8).astype(np.uint8)
+        gt[s] = {"A": m[None]}
+    configs = [skpp.PostprocessConfig(mode="threshold", t=t, closing_radius=1, min_area=2) for t in (0.6, 0.7, 0.8)]
+    out = []
+    for order in (stems, list(reversed(stems)), stems[3:] + stems[:3]):
+        best, df = tn.grid_search(order, lambda s: probs[s], gt, {}, {}, configs)
+        out.append((best, df["pq"].tolist()))
+    assert out[0] == out[1] == out[2]

@@ -27,6 +27,10 @@ fi
 source .venv/bin/activate
 pip install -q --upgrade pip
 pip install -q -r requirements.txt
+# Kaggle CLI for the competition download below -- pod-only tooling, so it is
+# pinned here (the Mac version that pushed the Spec 05 kernels) rather than in
+# requirements.txt, which Kaggle notebooks also install.
+pip install -q kaggle==2.2.5
 
 echo "== Kaggle auth =="
 mkdir -p ~/.kaggle

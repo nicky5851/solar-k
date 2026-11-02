@@ -153,7 +153,11 @@ def load_or_build(stem: str, raw_path: Path) -> tuple[np.ndarray, tuple[float, f
     result = preprocess_image(raw)
     save_processed(stem, result["processed"])
     save_disk_info(stem, result["cx"], result["cy"], result["radius"])
-    return result["processed"], (result["cx"], result["cy"], result["radius"])
+    # Return exactly what a later cache hit returns (float16-rounded, then
+    # float32), so features never depend on whether the cache was warm
+    # (CODING_SPEC_05_ENSEMBLE.md section 2.1, determinism).
+    processed = result["processed"].astype(np.float16).astype(np.float32)
+    return processed, (result["cx"], result["cy"], result["radius"])
 
 
 def _build_cache_one(args: tuple[str, Path]) -> str:

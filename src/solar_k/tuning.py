@@ -69,7 +69,9 @@ def grid_search(
     several GB on an 8 GB Mac for a fold-sized val set.
     """
     per_config_matches: list[list] = [[] for _ in configs]
-    for stem_i, stem in enumerate(tune_stems):
+    # sorted: a set's iteration order depends on PYTHONHASHSEED, which changes
+    # the float summation order of tp_ious and can flip near-tied configs.
+    for stem_i, stem in enumerate(sorted(tune_stems)):
         if stem not in gt_by_stem:
             continue
         if progress:

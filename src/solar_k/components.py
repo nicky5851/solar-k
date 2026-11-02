@@ -86,12 +86,30 @@ def _shape_features(mask_crop: np.ndarray) -> dict:
         if hull_area > 0:
             solidity = float(area / hull_area)
         if len(c) >= 5:
-            (_, _), (_, _), angle = cv2.fitEllipse(c)
-            orientation = float(angle)
+            orientation = _orientation(c)
     return {
         "area": area, "length": skel_len, "elongation": elongation,
         "mean_width": mean_width, "max_width": max_width, "solidity": solidity, "orientation": orientation,
     }
+
+
+def _orientation(contour: np.ndarray) -> float:
+    """Ellipse-fit angle in degrees, [0, 180). ``cv2.fitEllipse`` on a
+    degenerate contour (all points collinear, e.g. a 1-px-wide straight
+    component) returns values that depend on uninitialised memory -- the
+    same component gave 22.5 or 0.0 depending on what ran earlier in the
+    process, which made the learned scorer and its cutoff c
+    non-deterministic (CODING_SPEC_05_ENSEMBLE.md section 2.1). For those,
+    use the second-moment angle of the contour points instead (deterministic,
+    same [0, 180) range); well-conditioned fits are unchanged."""
+    (_, _), (w, h), _ = cv2.minAreaRect(contour)
+    if min(w, h) >= 1.0:
+        (_, _), (_, _), angle = cv2.fitEllipse(contour)
+        return float(angle)
+    pts = contour.reshape(-1, 2).astype(np.float64)
+    d = pts - pts.mean(axis=0)
+    mu20, mu02, mu11 = (d[:, 0] ** 2).mean(), (d[:, 1] ** 2).mean(), (d[:, 0] * d[:, 1]).mean()
+    return float(np.degrees(0.5 * np.arctan2(2 * mu11, mu20 - mu02)) % 180.0)
 
 
 def _prob_features(mask: np.ndarray, probs: np.ndarray) -> dict:

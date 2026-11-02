@@ -148,7 +148,16 @@ def infer_tiled(model: torch.nn.Module, device: torch.device, arr: np.ndarray, t
     return out / np.maximum(weight, 1e-6)
 
 
-def make_prob_fn(model: torch.nn.Module, device: torch.device, tta_flips: bool = True, tile_size: int | None = None, overlap: int = 128):
+def make_prob_fn(
+    model: torch.nn.Module, device: torch.device, tta_flips: bool = True, tile_size: int | None = None, overlap: int = 128,
+    tta_views: int = 3,
+):
+    """Flip TTA. ``tta_views`` (CODING_SPEC_05_ENSEMBLE.md E014): 3 = identity +
+    h-flip + v-flip (the default every saved E004/E006/E007 map used, kept
+    bit-for-bit), 4 = those plus the h+v flip. ``tta_flips=False`` -> 1 view."""
+    if tta_views not in (3, 4):
+        raise ValueError(f"tta_views must be 3 or 4, got {tta_views}")
+
     def infer(arr: np.ndarray) -> np.ndarray:
         if tile_size is not None:
             return infer_tiled(model, device, arr, tile_size, overlap)
@@ -159,7 +168,11 @@ def make_prob_fn(model: torch.nn.Module, device: torch.device, tta_flips: bool =
         if tta_flips:
             probs_h = infer(processed[:, ::-1])[:, ::-1]
             probs_v = infer(processed[::-1, :])[::-1, :]
-            probs = (probs + probs_h + probs_v) / 3.0
+            if tta_views == 4:
+                probs_hv = infer(processed[::-1, ::-1])[::-1, ::-1]
+                probs = (probs + probs_h + probs_v + probs_hv) / 4.0
+            else:
+                probs = (probs + probs_h + probs_v) / 3.0
         return probs * disk_mask.astype(np.float32)
 
     return prob_fn

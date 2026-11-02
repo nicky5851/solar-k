@@ -91,3 +91,26 @@ def test_to_dataframe_has_expected_columns():
     for col in skcomp.ALL_FEATURE_COLS:
         assert col in df.columns
     assert "is_tp" in df.columns and "best_iou" in df.columns
+
+
+def test_orientation_deterministic_for_degenerate_contours():
+    """CODING_SPEC_05 determinism: cv2.fitEllipse on collinear points returns
+    memory-dependent garbage; _orientation must not."""
+    import cv2
+
+    from solar_k import components as skcomp
+
+    rng = np.random.RandomState(0)
+    for crop in (np.ones((1, 12), np.uint8), np.ones((9, 1), np.uint8), np.eye(7, dtype=np.uint8)):
+        crop = np.pad(crop, 2)
+        cs, _ = cv2.findContours(crop, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        c = max(cs, key=cv2.contourArea)
+        if len(c) < 5:
+            c = np.concatenate([c] * 5)
+        vals = set()
+        for _ in range(20):
+            for _ in range(50):  # churn OpenCV's scratch memory with unrelated fits
+                cv2.fitEllipse((rng.rand(rng.randint(5, 40), 1, 2) * 100).astype(np.int32))
+            vals.add(skcomp._orientation(c))
+        assert len(vals) == 1
+        assert 0.0 <= vals.pop() < 180.0

@@ -178,11 +178,12 @@ def save_probs_png(probs: np.ndarray, path: Path) -> None:
     cv2.imwrite(str(path), arr_u8)
 
 
-def run_inference_and_save(model, device, items: list[tuple[str, Path]], out_dir: Path, tile_size: int, overlap: int) -> None:
+def run_inference_and_save(model, device, items: list[tuple[str, Path]], out_dir: Path, tile_size: int, overlap: int, tta_views: int = 3) -> None:
     """``items`` is a list of (stem, raw_image_path). No postprocessing or
     tuning here by design -- that runs locally against these saved probs
-    (CODING_SPEC_02_BASELINE.md's Kaggle path)."""
-    prob_fn = sku.make_prob_fn(model, device, tta_flips=True, tile_size=tile_size, overlap=overlap)
+    (CODING_SPEC_02_BASELINE.md's Kaggle path). ``tta_views``: see
+    ``unet.make_prob_fn`` (3 = every map saved before CODING_SPEC_05)."""
+    prob_fn = sku.make_prob_fn(model, device, tta_flips=True, tile_size=tile_size, overlap=overlap, tta_views=tta_views)
     model.eval()
     with torch.no_grad():
         for stem, path in items:
@@ -381,12 +382,12 @@ def main() -> None:
 
         oof_dir = skio.output_root() / cfg["experiment_id"] / "oof"
         t0 = time.time()
-        run_inference_and_save(model, device, [(s, train_paths[s]) for s in all_val_stems], oof_dir, tile_size, overlap)
+        run_inference_and_save(model, device, [(s, train_paths[s]) for s in all_val_stems], oof_dir, tile_size, overlap, cfg.get("tta_views", 3))
         print(f"Saved {len(all_val_stems)} OOF prob maps to {oof_dir} in {(time.time() - t0) / 60:.1f} min")
 
         test_dir = skio.output_root() / cfg["experiment_id"] / "test_probs"
         t0 = time.time()
-        run_inference_and_save(model, device, list(test_paths.items()), test_dir, tile_size, overlap)
+        run_inference_and_save(model, device, list(test_paths.items()), test_dir, tile_size, overlap, cfg.get("tta_views", 3))
         print(f"Saved {len(test_paths)} test prob maps to {test_dir} in {(time.time() - t0) / 60:.1f} min")
 
 

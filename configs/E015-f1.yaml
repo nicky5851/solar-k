@@ -1,0 +1,39 @@
+experiment_id: E015-f1
+description: >
+  CODING_SPEC_05_ENSEMBLE.md E015, fold 1: third, architecturally distinct
+  ensemble member. U-Net with a RegNet encoder (tu-regnety_040, ImageNet via
+  timm) -- a different family from E004 (resnet34) and E007 (efficientnet-b4).
+  Must expose a stride-2 skip feature (tests/test_encoder_stride.py); if it
+  doesn't, or doesn't fit at batch 8/crop 512 with AMP, fall back to
+  resnext50_32x4d and record the switch in experiments.csv. Same recipe as
+  E007 (6000 iters, EMA 0.999, PQ checkpoint selection every 1000 iters,
+  same sampler/augment/loss, 3-view flip TTA for saved OOF/test probs).
+  Approved by Nicky 2026-11-02 to train now, ahead of E013's result.
+seed: 42
+fold: 1
+device: auto
+encoder_name: tu-regnety_040
+crop_size: 512
+batch_size: 8
+dataset_length: null
+total_iterations: 6000
+warmup_steps: 450
+lr: 0.0003
+weight_decay: 0.0001
+checkpoint_every: 1000
+log_every: 100
+amp: true
+ema_decay: 0.999
+checkpoint_select_by: pq
+n_pq_val_images: 40
+num_workers: 4
+cache_workers: 4
+prebuild_cache: true
+save_oof_and_test_probs: true
+infer_tile_size: 1024
+infer_overlap: 128
+checkpoint_postprocess:
+  mode: threshold
+  t: 0.7
+  closing_radius: 2
+  min_area: 418

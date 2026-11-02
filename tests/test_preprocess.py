@@ -98,3 +98,19 @@ def test_build_cache_skips_already_cached(tmp_path, monkeypatch):
     assert n_built_second == 0  # nothing left to build
     for stem, _ in paths:
         assert pp.processed_path(stem).exists()
+
+
+def test_load_or_build_miss_and_hit_are_bit_identical(tmp_path, monkeypatch):
+    """CODING_SPEC_05 determinism: features must not depend on whether the
+    preprocessing cache was warm (a miss used to return unrounded float32)."""
+    monkeypatch.setenv("SOLAR_K_DATA", str(tmp_path))
+    img, _ = _synthetic_disk()
+    raw_path = tmp_path / "raw.png"
+    import cv2
+
+    cv2.imwrite(str(raw_path), img)
+    miss, info_miss = pp.load_or_build("stemB", raw_path)
+    hit, info_hit = pp.load_or_build("stemB", raw_path)
+    assert miss.dtype == hit.dtype == np.float32
+    assert np.array_equal(miss, hit)
+    assert info_miss == info_hit
