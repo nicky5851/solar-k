@@ -59,15 +59,15 @@ def decide(bar: str, cmp_cv: dict, cmp_model: dict | None) -> dict:
     b = BARS[bar]
     if bar == "early":
         checks = {
-            "pooled_delta_ge_0.008": cmp_cv["pooled_delta_pq"] >= b["min_pooled_delta"],
-            "positive_on_every_model_fold": all(v > 0 for v in cmp_model["per_group_delta_pq"].values()),
+            "pooled_delta_ge_0.008": bool(cmp_cv["pooled_delta_pq"] >= b["min_pooled_delta"]),
+            "positive_on_every_model_fold": bool(all(v > 0 for v in cmp_model["per_group_delta_pq"].values())),
         }
     else:
         checks = {
-            f"mean_delta_ge_{b['min_mean_delta']}": cmp_cv["mean_group_delta_pq"] >= b["min_mean_delta"],
-            f"positive_on_ge_{b['min_folds_positive']}_folds": cmp_cv["n_groups_positive"] >= b["min_folds_positive"],
-            "pooled_sq_drop_le_0.005": cmp_cv["pooled_delta_sq"] >= -b["sq_tolerance"],
-            "bootstrap_ci_excludes_0": cmp_cv["bootstrap_ci95_pooled_delta_pq"][0] > 0,
+            f"mean_delta_ge_{b['min_mean_delta']}": bool(cmp_cv["mean_group_delta_pq"] >= b["min_mean_delta"]),
+            f"positive_on_ge_{b['min_folds_positive']}_folds": bool(cmp_cv["n_groups_positive"] >= b["min_folds_positive"]),
+            "pooled_sq_drop_le_0.005": bool(cmp_cv["pooled_delta_sq"] >= -b["sq_tolerance"]),
+            "bootstrap_ci_excludes_0": bool(cmp_cv["bootstrap_ci95_pooled_delta_pq"][0] > 0),
         }
     return {"bar": bar, "checks": checks, "passes": bool(all(checks.values()))}
 
