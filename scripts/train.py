@@ -38,7 +38,6 @@ from pathlib import Path
 import cv2
 import numpy as np
 import torch
-import torch.nn.functional as F
 import yaml
 from torch.utils.data import DataLoader
 
@@ -46,6 +45,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from solar_k import dataset as skds
 from solar_k import io as skio
+from solar_k import losses as sklo
 from solar_k import preprocess as skpre
 from solar_k import sampler as sksamp
 from solar_k import unet as sku
@@ -70,13 +70,7 @@ def fold_stems(fold: int, exclude: bool = False) -> list[str]:
     return folds.loc[mask, "file_stem"].tolist()
 
 
-def soft_dice_loss(logits: torch.Tensor, target: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
-    probs = torch.sigmoid(logits)
-    dims = (1, 2, 3)
-    intersection = (probs * target).sum(dims)
-    union = probs.sum(dims) + target.sum(dims)
-    dice = (2 * intersection + eps) / (union + eps)
-    return 1.0 - dice.mean()
+soft_dice_loss = sklo.soft_dice_loss  # CODING_SPEC_06 E020: moved to solar_k.losses
 
 
 def pixel_dice_at_threshold(prob_map: np.ndarray, target: np.ndarray, t: float = 0.5) -> float:
@@ -243,10 +237,12 @@ def main() -> None:
             print(f"Loaded hard negatives for {len(hard_negatives_by_stem)}/{len(train_stems)} training stems")
         crop_sampler = sksamp.CropCenterSampler(mix=sampler_mix, hard_negatives_by_stem=hard_negatives_by_stem)
 
+    skeleton_recall = cfg.get("skeleton_recall", False)
+    skeleton_lambda = cfg.get("skeleton_lambda", 1.0)
     train_ds = skds.SolarCropDataset(
         train_stems, images_by_file, anns_by_image_id,
         crop_size=cfg.get("crop_size", 512), length=cfg.get("dataset_length"), seed=cfg.get("seed", 42),
-        sampler=crop_sampler,
+        sampler=crop_sampler, skeleton_recall=skeleton_recall,
     )
     loader = DataLoader(
         train_ds, batch_size=cfg.get("batch_size", 8), shuffle=True, num_workers=num_workers,
@@ -309,16 +305,22 @@ def main() -> None:
     stopped_early = False
     while it < total_iters:
         try:
-            imgs, targets = next(data_iter)
+            batch = next(data_iter)
         except StopIteration:
             data_iter = iter(loader)
-            imgs, targets = next(data_iter)
+            batch = next(data_iter)
+        if skeleton_recall:
+            imgs, targets, skeletons = batch
+            skeletons = skeletons.to(device)
+        else:
+            imgs, targets = batch
+            skeletons = None
         imgs, targets = imgs.to(device), targets.to(device)
 
         optimizer.zero_grad()
         with torch.amp.autocast("cuda", enabled=use_amp):
             logits = model(imgs)
-            loss = F.binary_cross_entropy_with_logits(logits, targets) + soft_dice_loss(logits, targets)
+            loss = sklo.segmentation_loss(logits, targets, skeletons, skeleton_lambda)
         if use_amp:
             scaler.scale(loss).backward()
             scaler.step(optimizer)

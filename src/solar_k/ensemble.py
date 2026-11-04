@@ -56,29 +56,42 @@ def test_sources(members: list[str], stem: str, folds: list[int] | None = None) 
     return [member_dir(m, f) / "test_probs" / f"{stem}.png" for m in members for f in folds]
 
 
-def mean_of(paths: list[Path]) -> np.ndarray:
-    """Running mean, so peak memory is two maps regardless of member count.
-    Summation order is the order of ``paths`` -- fixed, so bit-reproducible."""
+def mean_of(paths: list[Path], weights: list[float] | None = None) -> np.ndarray:
+    """Running (weighted) mean, so peak memory is two maps regardless of
+    member count. Summation order is the order of ``paths`` -- fixed, so
+    bit-reproducible. ``weights`` (CODING_SPEC_06 E018), if given, must align
+    1:1 with ``paths`` and need not sum to 1; equal weights reproduce the
+    original unweighted mean exactly."""
     if not paths:
         raise ValueError("no probability maps to average")
+    if weights is not None and len(weights) != len(paths):
+        raise ValueError(f"{len(weights)} weights for {len(paths)} paths")
     acc = None
-    for p in paths:
+    wsum = 0.0
+    for i, p in enumerate(paths):
         arr = load_prob_png(p)
+        w = 1.0 if weights is None else float(weights[i])
+        wsum += w
         if acc is None:
-            acc = arr.astype(np.float32, copy=True)
+            acc = arr.astype(np.float32, copy=True) * np.float32(w)
         else:
-            acc += arr
+            acc += arr * np.float32(w)
         del arr
-    acc /= np.float32(len(paths))
+    acc /= np.float32(wsum)
     return acc
 
 
-def load_oof_mean(members: list[str], stem: str, fold_by_stem: dict[str, int]) -> np.ndarray:
-    return mean_of(oof_sources(members, stem, fold_by_stem))
+def load_oof_mean(members: list[str], stem: str, fold_by_stem: dict[str, int], weights: list[float] | None = None) -> np.ndarray:
+    return mean_of(oof_sources(members, stem, fold_by_stem), weights)
 
 
-def load_test_mean(members: list[str], stem: str, folds: list[int] | None = None) -> np.ndarray:
-    return mean_of(test_sources(members, stem, folds))
+def load_test_mean(members: list[str], stem: str, folds: list[int] | None = None, weights: list[float] | None = None) -> np.ndarray:
+    """``weights``, if given, is one weight per *member* (not per map); it is
+    expanded across that member's folds, matching ``test_sources``' member-outer,
+    fold-inner order, so a member's weight is split equally over its 5 folds."""
+    n_folds = len(folds) if folds is not None else N_MODEL_FOLDS
+    expanded = None if weights is None else [w for w in weights for _ in range(n_folds)]
+    return mean_of(test_sources(members, stem, folds), expanded)
 
 
 def available_oof_stems(members: list[str], fold_by_stem: dict[str, int], model_folds: list[int] | None = None) -> list[str]:

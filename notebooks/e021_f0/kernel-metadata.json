@@ -1,0 +1,18 @@
+{
+  "id": "potcharapanchumrak/solar-k-e021-f0-train",
+  "title": "solar-k-e021-f0-train",
+  "code_file": "kaggle_train_e021_f0.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": true,
+  "dataset_sources": [
+    "potcharapanchumrak/solar-k-package"
+  ],
+  "competition_sources": [
+    "filament-segmentation-2026"
+  ],
+  "kernel_sources": [],
+  "model_sources": []
+}

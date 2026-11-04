@@ -1,0 +1,46 @@
+experiment_id: E020-f4
+description: >
+  CODING_SPEC_06_RECALL_AND_CONNECTIVITY.md E020, fold 4: E007's recipe
+  exactly (efficientnet-b4, EMA 0.999, PQ checkpoint selection, seed 42,
+  3-view TTA for saved maps), plus two pre-registered changes: BCE + soft
+  Dice + skeleton-recall loss (Kirchhoff et al., ECCV 2024; lambda=1.0) on a
+  precomputed 1-px-dilated target skeleton, and crop 768 / batch 4 (from
+  crop 512 / batch 8) to give the model more context for thin, faint
+  filaments. 8000 iterations (not 6000), since the larger crop needs more
+  steps per epoch-equivalent. Fallback if efficientnet-b4 doesn't fit at
+  crop 768/batch 4 with AMP: crop 640/batch 6 (record whichever was used in
+  experiments.csv). Gate: folds 0-1 first (spec section 4).
+seed: 42
+fold: 4
+device: auto
+encoder_name: efficientnet-b4
+crop_size: 768
+batch_size: 4
+dataset_length: null
+total_iterations: 8000
+warmup_steps: 600
+lr: 0.0003
+weight_decay: 0.0001
+checkpoint_every: 1000
+log_every: 100
+amp: true
+ema_decay: 0.999
+checkpoint_select_by: pq
+n_pq_val_images: 40
+skeleton_recall: true
+skeleton_lambda: 1.0
+# RunPod pod CPU count is unknown ahead of time -- setup_remote.sh prints
+# nproc; raise these to match if the pod has more than 4 cores available.
+num_workers: 4
+cache_workers: 4
+prebuild_cache: true
+save_oof_and_test_probs: true
+infer_tile_size: 1024
+infer_overlap: 128
+# If crop 768/batch 4 doesn't fit in VRAM with AMP, fall back to crop 640,
+# batch 6 (CODING_SPEC_06 section 4) and record it in experiments.csv.
+checkpoint_postprocess:
+  mode: threshold
+  t: 0.7
+  closing_radius: 2
+  min_area: 418

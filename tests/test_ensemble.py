@@ -58,6 +58,31 @@ def test_test_mean_uses_all_members_and_folds(fake_outputs):
     np.testing.assert_allclose(mean, expected, atol=1e-6)
 
 
+def test_weighted_oof_mean_matches_manual_weighted_average(fake_outputs):
+    # CODING_SPEC_06 E018: member weights for load_oof_mean.
+    stems, fold = fake_outputs
+    fold_by_stem = skens.model_fold_by_stem()
+    s = stems[5]
+    k = fold[s]
+    unweighted = skens.load_oof_mean(["EA", "EB"], s, fold_by_stem)
+    equal = skens.load_oof_mean(["EA", "EB"], s, fold_by_stem, weights=[1.0, 1.0])
+    np.testing.assert_allclose(unweighted, equal, rtol=0, atol=1e-7)
+    weighted = skens.load_oof_mean(["EA", "EB"], s, fold_by_stem, weights=[0.3, 0.7])
+    a_val, b_val = (0 + k) / 255.0, (10 + k) / 255.0
+    expected = 0.3 * a_val + 0.7 * b_val
+    np.testing.assert_allclose(weighted, expected, rtol=0, atol=1e-6)
+
+
+def test_weighted_test_mean_expands_member_weight_over_its_folds(fake_outputs):
+    stems, _ = fake_outputs
+    unweighted = skens.load_test_mean(["EA", "EB"], stems[0])
+    weighted = skens.load_test_mean(["EA", "EB"], stems[0], weights=[1.0, 1.0])
+    np.testing.assert_allclose(unweighted, weighted, rtol=0, atol=1e-6)
+    only_eb = skens.load_test_mean(["EA", "EB"], stems[0], weights=[0.0, 1.0])
+    expected = np.mean([10 + k for k in range(5)]) / 255.0
+    np.testing.assert_allclose(only_eb, expected, atol=1e-6)
+
+
 def test_single_member_mean_is_the_member_map(fake_outputs):
     stems, fold = fake_outputs
     m = skens.load_oof_mean(["EB"], stems[3], skens.model_fold_by_stem())

@@ -72,21 +72,25 @@ def decide(bar: str, cmp_cv: dict, cmp_model: dict | None) -> dict:
     return {"bar": bar, "checks": checks, "passes": bool(all(checks.values()))}
 
 
-def write_submission(experiment: str, members: list[str], stems: list[str], day_by_stem: dict, runner_workers: int) -> dict:
+def write_submission(experiment: str, members: list[str], stems: list[str], day_by_stem: dict, runner_workers: int, weight_grid: list[tuple[float, ...]] | None = None) -> dict:
     """Final post-processing fit on all OOF stems, applied to the mean of every
     member x fold test map (spec E010/E013)."""
     import validate_submission as vs
 
     runner = cvp.Runner(members, runner_workers)
     try:
-        stats = cvp.cfg1_stats(runner, stems, log)
-        cfg1, cfg1_pq = cvp.choose_cfg1(stats, stems)
-        tables = cvp.component_tables(runner, stems, cfg1, log)
+        if weight_grid:
+            weights, cfg1, cfg1_pq = cvp.choose_weights_and_cfg1(runner, stems, stems, weight_grid, log)
+        else:
+            weights = None
+            stats = cvp.cfg1_stats(runner, stems, None, log)
+            cfg1, cfg1_pq = cvp.choose_cfg1(stats, stems)
+        tables = cvp.component_tables(runner, stems, cfg1, weights, log)
         index = cvp.StatsIndex([tables[s] for s in stems])
         rule = cvp.fit_keep_rule(index, stems)
         kept = cvp.kept_labels_by_stem(index, rule["keep"], stems)
         sub = cvp.day_grouped_subsample(stems, day_by_stem)
-        (t_mask, d), _, _ = cvp.choose_regrow(runner, cfg1, kept, sub, log)
+        (t_mask, d), _, _ = cvp.choose_regrow(runner, cfg1, kept, sub, weights, log)
     finally:
         runner.close()
     log(f"final fit on {len(stems)}: cfg1={cvp.cfg_key(cfg1)} gate={rule['shape_gate']} c={rule['scorer_c']} regrow=({t_mask},{d})")
@@ -96,7 +100,7 @@ def write_submission(experiment: str, members: list[str], stems: list[str], day_
     rows = []
     test_paths = {p.stem: p for p in skio.iter_test_images()}
     for stem in sorted(test_paths):
-        probs = skens.load_test_mean(members, stem)
+        probs = skens.load_test_mean(members, stem, weights=list(weights) if weights else None)
         processed, disk_info = skpre.load_or_build(stem, test_paths[stem])
         features, labels = skcomp.extract_components(stem, probs, processed, disk_info, ccfg)
         df = skcomp.to_dataframe(features)
@@ -118,7 +122,8 @@ def write_submission(experiment: str, members: list[str], stems: list[str], day_
     log(f"wrote + validated {out} ({len(rows)} instances)")
     return {"path": str(out.relative_to(REPO_ROOT)), "n_instances": len(rows), "cfg1": cfg1.__dict__,
             "shape_gate": rule["shape_gate"], "scorer_c": rule["scorer_c"], "regrow_t_mask": t_mask, "regrow_d": d,
-            "test_members": members, "test_folds": list(range(skens.N_MODEL_FOLDS))}
+            "test_members": members, "test_folds": list(range(skens.N_MODEL_FOLDS)),
+            "member_weights": list(weights) if weights else None}
 
 
 def main() -> None:
@@ -132,7 +137,18 @@ def main() -> None:
     ap.add_argument("--bar", choices=sorted(BARS), default=None)
     ap.add_argument("--cache-tag", default="", help="separate cold cache (for the run-twice determinism check)")
     ap.add_argument("--write-submission", action="store_true")
+    ap.add_argument("--weight-grid", nargs="+", default=None,
+                     help="CODING_SPEC_06 E018: one or more comma-separated per-member weight vectors "
+                          "(aligned with --members order), e.g. --weight-grid 0,0.5,0.5 0.15,0.425,0.425 0.3,0.35,0.35. "
+                          "Chosen inside each CV fold's train portion jointly with cfg1.")
     args = ap.parse_args()
+
+    weight_grid = None
+    if args.weight_grid:
+        weight_grid = [tuple(float(x) for x in w.split(",")) for w in args.weight_grid]
+        for w in weight_grid:
+            if len(w) != len(args.members):
+                raise SystemExit(f"weight vector {w} has {len(w)} entries for {len(args.members)} members")
 
     t0 = time.time()
     cvp.CACHE_TAG = args.cache_tag
@@ -151,7 +167,7 @@ def main() -> None:
     log(f"{args.experiment}: members={args.members} images={len(stems)} model folds={model_folds_present}")
 
     res = cvp.run_p5(args.members, stems, day_by_stem, site_by_stem, disk_info_by_stem, quartile_edges,
-                     workers=args.workers, cv_folds=args.cv_folds, log=log)
+                     workers=args.workers, cv_folds=args.cv_folds, weight_grid=weight_grid, log=log)
 
     per_image_path = INTERIM / f"{args.experiment}_p5_per_image.csv"
     res.per_image.to_csv(per_image_path, index=False)
@@ -163,7 +179,8 @@ def main() -> None:
         "model_folds": model_folds_present, "n_images": len(stems), "cv_folds_run": args.cv_folds or list(range(len(res.per_fold))),
         **res.summary, "per_fold": res.per_fold,
         "grids": {"cfg1": [cvp.cfg_key(c) for c in cvp.CFG1_GRID], "elongation": cvp.ELONG_GRID, "length": cvp.LEN_GRID,
-                  "c": cvp.C_GRID, "regrow": cvp.REGROW_GRID, "regrow_max_images": cvp.REGROW_MAX_IMAGES, "seed": cvp.SEED},
+                  "c": cvp.C_GRID, "regrow": cvp.REGROW_GRID, "regrow_max_images": cvp.REGROW_MAX_IMAGES, "seed": cvp.SEED,
+                  "weight_grid": [list(w) for w in weight_grid] if weight_grid else None},
     }
     if len(model_folds_present) > 1 and res.per_image is not None and len(res.per_image):
         summary["per_model_fold_pq"] = {int(k): round(cvp.pooled_pq_from_images(g), 4) for k, g in res.per_image.groupby("model_fold")}
@@ -178,7 +195,7 @@ def main() -> None:
         log(f"vs {args.reference}: {json.dumps(summary['vs_reference'])}")
 
     if args.write_submission:
-        summary["submission"] = write_submission(args.experiment, args.members, stems, day_by_stem, args.workers)
+        summary["submission"] = write_submission(args.experiment, args.members, stems, day_by_stem, args.workers, weight_grid)
 
     summary["runtime_minutes"] = round((time.time() - t0) / 60, 1)
     out = INTERIM / f"{args.experiment}_p5_summary.json"

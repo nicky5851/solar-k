@@ -120,9 +120,11 @@ def test_cfg1_stats_match_grid_search_matches():
         assert stats[i, 0] == pytest.approx(sum(o.tp_ious), abs=1e-12)
 
 
-def test_cv_grid_has_42_configs():
-    assert len(cvp.CFG1_GRID) == 42
-    assert len({cvp.cfg_key(c) for c in cvp.CFG1_GRID}) == 42
+def test_cv_grid_has_66_configs():
+    # CODING_SPEC_06 E018 widened grid: 10 thresholds x 3 closing radii (30)
+    # + 4 t_low x 3 t_high x 3 closing radii (36) = 66.
+    assert len(cvp.CFG1_GRID) == 66
+    assert len({cvp.cfg_key(c) for c in cvp.CFG1_GRID}) == 66
 
 
 def test_day_grouped_subsample_is_seeded_and_day_grouped():

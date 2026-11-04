@@ -57,8 +57,13 @@ H = W = 2048
 MIN_AREA = 418
 N_CV_FOLDS = 5
 
-_T_GRID = [0.55, 0.575, 0.6, 0.625, 0.65, 0.7, 0.8, 0.925]
-_HYST_GRID = [(lo, hi) for lo in (0.5, 0.6) for hi in (0.9, 0.95, 0.975)]
+# CODING_SPEC_06 E018: widened from Spec 05's grid (every P5 winner sat at a
+# grid edge -- hysteresis t_high at its max, t_low at its min, regrow d at
+# its min). t in {0.45, 0.5} is added to the threshold grid; the hysteresis
+# and regrow grids are replaced by their widened ranges below (both still
+# contain Spec 05's edge winners: hyst (0.5, 0.975), regrow d=8).
+_T_GRID = [0.45, 0.5, 0.55, 0.575, 0.6, 0.625, 0.65, 0.7, 0.8, 0.925]
+_HYST_GRID = [(lo, hi) for lo in (0.35, 0.4, 0.45, 0.5) for hi in (0.975, 0.985, 0.99)]
 _R_GRID = [1, 2, 3]
 CFG1_GRID: list[skpp.PostprocessConfig] = (
     [skpp.PostprocessConfig(mode="threshold", t=t, closing_radius=r, min_area=MIN_AREA) for t in _T_GRID for r in _R_GRID]
@@ -67,7 +72,7 @@ CFG1_GRID: list[skpp.PostprocessConfig] = (
 ELONG_GRID = [0.0, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0]
 LEN_GRID = [0.0, 5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 40.0, 50.0]
 C_GRID = [round(x, 3) for x in np.arange(0.0, 0.525, 0.025)]
-REGROW_GRID = [(t_mask, d) for t_mask in (0.5, 0.6) for d in (8, 12, 16)]
+REGROW_GRID = [(t_mask, d) for t_mask in (0.4, 0.5, 0.6) for d in (4, 6, 8)]
 REGROW_MAX_IMAGES = 150
 SEED = 0
 
@@ -305,8 +310,8 @@ def _worker_init(members: list[str], output_root: str | None) -> None:
     _W["train_paths"] = {p.stem: p for p in skio.iter_train_images()}
 
 
-def _probs(stem: str) -> np.ndarray:
-    return skens.load_oof_mean(_W["members"], stem, _W["fold_by_stem"])
+def _probs(stem: str, weights: tuple[float, ...] | None = None) -> np.ndarray:
+    return skens.load_oof_mean(_W["members"], stem, _W["fold_by_stem"], list(weights) if weights else None)
 
 
 def _gt(stem: str) -> dict:
@@ -318,16 +323,17 @@ def _sparse_gt(gt: dict) -> dict:
     return {a: sp.csr_matrix(g.reshape(g.shape[0], -1)) for a, g in gt.items()}
 
 
-def _job_cfg1(stem: str):
-    probs = _probs(stem)
+def _job_cfg1(args):
+    stem, weights = args
+    probs = _probs(stem, weights)
     out = cfg1_stats_for_image(probs, _sparse_gt(_gt(stem)))
     return stem, out
 
 
 def _job_table(args):
-    stem, cfg_dict = args
+    stem, cfg_dict, weights = args
     cfg = skpp.PostprocessConfig.from_dict(cfg_dict)
-    probs = _probs(stem)
+    probs = _probs(stem, weights)
     processed, disk_info = skpre.load_or_build(stem, _W["train_paths"][stem])
     t = component_table(stem, probs, processed, disk_info, cfg, _gt(stem))
     return stem, t
@@ -345,9 +351,9 @@ def _stack(masks: list[np.ndarray]) -> np.ndarray:
 
 
 def _job_regrow(args):
-    stem, cfg_dict, kept_labels, grid = args
+    stem, cfg_dict, kept_labels, grid, weights = args
     cfg = skpp.PostprocessConfig.from_dict(cfg_dict)
-    probs = _probs(stem)
+    probs = _probs(stem, weights)
     seeds = _kept_masks(probs, cfg, kept_labels)
     gt = _sparse_gt(_gt(stem))
     out = np.zeros((len(grid), 4), dtype=np.float64)
@@ -358,9 +364,9 @@ def _job_regrow(args):
 
 
 def _job_final(args):
-    stem, cfg_dict, kept_labels, t_mask, d, disk_info, site = args
+    stem, cfg_dict, kept_labels, t_mask, d, disk_info, site, weights = args
     cfg = skpp.PostprocessConfig.from_dict(cfg_dict)
-    probs = _probs(stem)
+    probs = _probs(stem, weights)
     seeds = _kept_masks(probs, cfg, kept_labels)
     pred = _stack(skpp.regrow_instances(probs, seeds, t_mask, d) if seeds else [])
     results = [
@@ -410,8 +416,17 @@ class P5Result:
 CACHE_TAG = ""  # set e.g. "rerun" to force a cold, separate cache (determinism checks)
 
 
-def _cache_dir(members: list[str]) -> Path:
-    d = skio.output_root() / "p5_cache" / ("+".join(members) + (f"__{CACHE_TAG}" if CACHE_TAG else ""))
+def weight_tag(weights: tuple[float, ...] | None) -> str:
+    if not weights:
+        return "equal"
+    return "w" + "-".join(f"{w:.3f}" for w in weights)
+
+
+def _cache_dir(members: list[str], weights: tuple[float, ...] | None = None) -> Path:
+    name = "+".join(members)
+    if weights:
+        name += f"_{weight_tag(weights)}"
+    d = skio.output_root() / "p5_cache" / (name + (f"__{CACHE_TAG}" if CACHE_TAG else ""))
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -420,24 +435,24 @@ def _grid_hash() -> str:
     return hashlib.md5(json.dumps([c.__dict__ for c in CFG1_GRID], sort_keys=True).encode()).hexdigest()[:8]
 
 
-def cfg1_stats(runner: Runner, stems: list[str], log=print) -> dict[str, np.ndarray]:
-    path = _cache_dir(runner.members) / f"cfg1_stats_{_grid_hash()}.pkl"
+def cfg1_stats(runner: Runner, stems: list[str], weights: tuple[float, ...] | None = None, log=print) -> dict[str, np.ndarray]:
+    path = _cache_dir(runner.members, weights) / f"cfg1_stats_{_grid_hash()}.pkl"
     cached = pickle.loads(path.read_bytes()) if path.exists() else {}
     todo = [s for s in stems if s not in cached]
     if todo:
-        log(f"cfg1 sweep: {len(todo)} images x {len(CFG1_GRID)} configs")
-        cached.update(runner.map(_job_cfg1, todo, log, "cfg1"))
+        log(f"cfg1 sweep ({weight_tag(weights)}): {len(todo)} images x {len(CFG1_GRID)} configs")
+        cached.update(runner.map(_job_cfg1, [(s, weights) for s in todo], log, "cfg1"))
         path.write_bytes(pickle.dumps(cached))
     return {s: cached[s] for s in stems}
 
 
-def component_tables(runner: Runner, stems: list[str], cfg: skpp.PostprocessConfig, log=print) -> dict[str, ComponentTable]:
-    path = _cache_dir(runner.members) / f"tables_{cfg_key(cfg)}.pkl"
+def component_tables(runner: Runner, stems: list[str], cfg: skpp.PostprocessConfig, weights: tuple[float, ...] | None = None, log=print) -> dict[str, ComponentTable]:
+    path = _cache_dir(runner.members, weights) / f"tables_{cfg_key(cfg)}.pkl"
     cached = pickle.loads(path.read_bytes()) if path.exists() else {}
     todo = [s for s in stems if s not in cached]
     if todo:
-        log(f"component tables @ {cfg_key(cfg)}: {len(todo)} images")
-        cached.update(runner.map(_job_table, [(s, cfg.__dict__) for s in todo], log, "tables"))
+        log(f"component tables @ {cfg_key(cfg)} ({weight_tag(weights)}): {len(todo)} images")
+        cached.update(runner.map(_job_table, [(s, cfg.__dict__, weights) for s in todo], log, "tables"))
         path.write_bytes(pickle.dumps(cached))
     return {s: cached[s] for s in stems}
 
@@ -449,6 +464,21 @@ def choose_cfg1(stats: dict[str, np.ndarray], stems: list[str]) -> tuple[skpp.Po
     pqs = [pq_of(*row) for row in total]
     i = int(np.argmax(pqs))  # first max = first grid entry on ties
     return CFG1_GRID[i], float(pqs[i])
+
+
+def choose_weights_and_cfg1(runner: Runner, stems: list[str], train: list[str], weight_grid: list[tuple[float, ...]], log=print) -> tuple[tuple[float, ...] | None, skpp.PostprocessConfig, float]:
+    """CODING_SPEC_06 E018: member weights chosen inside the train portion
+    only, jointly with cfg1 -- for each candidate weight vector, the cfg1
+    sweep is run (and cached) on that weight's probability maps, and the
+    (weight, cfg1) pair with the best train-portion PQ wins. Ties go to the
+    first weight vector in ``weight_grid``, then the first cfg1 (grid order)."""
+    best = None
+    for w in weight_grid:
+        stats = cfg1_stats(runner, stems, w, log)
+        cfg1, pq = choose_cfg1(stats, train)
+        if best is None or pq > best[2]:
+            best = (w, cfg1, pq)
+    return best
 
 
 def fit_keep_rule(index: StatsIndex, train_stems: list[str]) -> dict:
@@ -484,8 +514,8 @@ def kept_labels_by_stem(index: StatsIndex, keep: np.ndarray, stems: list[str]) -
     return out
 
 
-def choose_regrow(runner: Runner, cfg: skpp.PostprocessConfig, kept: dict[str, list[int]], stems: list[str], log=print) -> tuple[tuple[float, int], float, list[float]]:
-    res = runner.map(_job_regrow, [(s, cfg.__dict__, kept[s], REGROW_GRID) for s in stems], log, "regrow")
+def choose_regrow(runner: Runner, cfg: skpp.PostprocessConfig, kept: dict[str, list[int]], stems: list[str], weights: tuple[float, ...] | None = None, log=print) -> tuple[tuple[float, int], float, list[float]]:
+    res = runner.map(_job_regrow, [(s, cfg.__dict__, kept[s], REGROW_GRID, weights) for s in stems], log, "regrow")
     total = np.zeros((len(REGROW_GRID), 4))
     for s in sorted(stems):
         total += res[s]
@@ -503,6 +533,7 @@ def run_p5(
     quartile_edges: list[float],
     workers: int = 3,
     cv_folds: list[int] | None = None,
+    weight_grid: list[tuple[float, ...]] | None = None,
     log=print,
 ) -> P5Result:
     stems = sorted(stems)
@@ -510,22 +541,27 @@ def run_p5(
     splits = cv_splits(stems, day_by_stem)
     runner = Runner(members, workers)
     try:
-        stats = cfg1_stats(runner, stems, log)
+        stats = None if weight_grid else cfg1_stats(runner, stems, None, log)
         result = P5Result()
         image_rows = []
         for i, (train, held) in enumerate(splits):
             if cv_folds is not None and i not in cv_folds:
                 continue
-            cfg1, cfg1_pq = choose_cfg1(stats, train)
-            log(f"CV fold {i}: cfg1={cfg_key(cfg1)} (train PQ {cfg1_pq:.4f})")
-            tables = component_tables(runner, stems, cfg1, log)
+            if weight_grid:
+                w, cfg1, cfg1_pq = choose_weights_and_cfg1(runner, stems, train, weight_grid, log)
+                log(f"CV fold {i}: weights={weight_tag(w)} cfg1={cfg_key(cfg1)} (train PQ {cfg1_pq:.4f})")
+            else:
+                w = None
+                cfg1, cfg1_pq = choose_cfg1(stats, train)
+                log(f"CV fold {i}: cfg1={cfg_key(cfg1)} (train PQ {cfg1_pq:.4f})")
+            tables = component_tables(runner, stems, cfg1, w, log)
             index = StatsIndex([tables[s] for s in stems])
             rule = fit_keep_rule(index, train)
             kept = kept_labels_by_stem(index, rule["keep"], stems)
             sub = day_grouped_subsample(train, day_by_stem)
-            (t_mask, d), regrow_pq, regrow_pqs = choose_regrow(runner, cfg1, kept, sub, log)
-            log(f"  gate={rule['shape_gate']} c={rule['scorer_c']} regrow=({t_mask},{d}) on {len(sub)} imgs")
-            final = runner.map(_job_final, [(s, cfg1.__dict__, kept[s], t_mask, d, disk_info_by_stem[s], site_by_stem[s]) for s in held], log, "held-out")
+            (t_mask, d), regrow_pq, regrow_pqs = choose_regrow(runner, cfg1, kept, sub, w, log)
+            log(f"  gate={rule['shape_gate']} c={rule['scorer_c']} regrow=({t_mask},{d}) weights={weight_tag(w)} on {len(sub)} imgs")
+            final = runner.map(_job_final, [(s, cfg1.__dict__, kept[s], t_mask, d, disk_info_by_stem[s], site_by_stem[s], w) for s in held], log, "held-out")
             results = [r for s in held for r in final[s]]
             summ = skeval.aggregate_evaluation(results, quartile_edges=quartile_edges, noisy_stems=set())
             o = summ.overall
@@ -535,6 +571,7 @@ def run_p5(
                                    "sum_iou": sum(m.tp_ious), "tp": m.tp, "fp": m.fp, "fn": m.fn})
             fold = {
                 "cv_fold": i, "n_train": len(train), "n_held": len(held),
+                "weights": list(w) if w else None,
                 "cfg1": {k: v for k, v in cfg1.__dict__.items()}, "cfg1_train_pq": round(cfg1_pq, 6),
                 "shape_gate": rule["shape_gate"], "scorer_c": rule["scorer_c"],
                 "regrow_t_mask": t_mask, "regrow_d": d, "regrow_n_images": len(sub), "regrow_grid_pq": regrow_pqs,
