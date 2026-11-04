@@ -193,12 +193,13 @@ class ComponentTable:
     hit_iou: np.ndarray  # (n_hits,) float64
 
 
-def component_table(stem: str, probs: np.ndarray, processed: np.ndarray, disk_info, cfg: skpp.PostprocessConfig, gt_by_annotator: dict, iou_threshold: float = skmetric.IOU_THRESHOLD) -> ComponentTable:
+def component_table(stem: str, probs: np.ndarray, processed: np.ndarray, disk_info, cfg: skpp.PostprocessConfig, gt_by_annotator: dict, iou_threshold: float = skmetric.IOU_THRESHOLD, member_probs: dict[str, np.ndarray] | None = None) -> ComponentTable:
     """extract_components + label_components, with IoUs from sparse stacks
     (same arithmetic as label_components, without a dense (n, H, W) pred
-    stack) and every IoU > threshold hit recorded."""
+    stack) and every IoU > threshold hit recorded. ``member_probs``
+    (CODING_SPEC_06 E019) adds agreement features to each row."""
     ccfg = components_cfg(cfg)
-    features, labels = skcomp.extract_components(stem, probs, processed, disk_info, ccfg)
+    features, labels = skcomp.extract_components(stem, probs, processed, disk_info, ccfg, member_probs)
     sparse = skcomp.components_to_sparse(labels, [f.label for f in features])
     del labels
     hits, hit_iou = [], []
@@ -331,11 +332,12 @@ def _job_cfg1(args):
 
 
 def _job_table(args):
-    stem, cfg_dict, weights = args
+    stem, cfg_dict, weights, use_agreement = args
     cfg = skpp.PostprocessConfig.from_dict(cfg_dict)
     probs = _probs(stem, weights)
     processed, disk_info = skpre.load_or_build(stem, _W["train_paths"][stem])
-    t = component_table(stem, probs, processed, disk_info, cfg, _gt(stem))
+    member_probs = skens.load_oof_members(_W["members"], stem, _W["fold_by_stem"]) if use_agreement else None
+    t = component_table(stem, probs, processed, disk_info, cfg, _gt(stem), member_probs=member_probs)
     return stem, t
 
 
@@ -446,13 +448,14 @@ def cfg1_stats(runner: Runner, stems: list[str], weights: tuple[float, ...] | No
     return {s: cached[s] for s in stems}
 
 
-def component_tables(runner: Runner, stems: list[str], cfg: skpp.PostprocessConfig, weights: tuple[float, ...] | None = None, log=print) -> dict[str, ComponentTable]:
-    path = _cache_dir(runner.members, weights) / f"tables_{cfg_key(cfg)}.pkl"
+def component_tables(runner: Runner, stems: list[str], cfg: skpp.PostprocessConfig, weights: tuple[float, ...] | None = None, use_agreement: bool = False, log=print) -> dict[str, ComponentTable]:
+    suffix = "_v2" if use_agreement else ""
+    path = _cache_dir(runner.members, weights) / f"tables_{cfg_key(cfg)}{suffix}.pkl"
     cached = pickle.loads(path.read_bytes()) if path.exists() else {}
     todo = [s for s in stems if s not in cached]
     if todo:
-        log(f"component tables @ {cfg_key(cfg)} ({weight_tag(weights)}): {len(todo)} images")
-        cached.update(runner.map(_job_table, [(s, cfg.__dict__, weights) for s in todo], log, "tables"))
+        log(f"component tables @ {cfg_key(cfg)} ({weight_tag(weights)}{suffix}): {len(todo)} images")
+        cached.update(runner.map(_job_table, [(s, cfg.__dict__, weights, use_agreement) for s in todo], log, "tables"))
         path.write_bytes(pickle.dumps(cached))
     return {s: cached[s] for s in stems}
 
@@ -481,8 +484,10 @@ def choose_weights_and_cfg1(runner: Runner, stems: list[str], train: list[str], 
     return best
 
 
-def fit_keep_rule(index: StatsIndex, train_stems: list[str]) -> dict:
-    """Gate -> scorer -> c, all on train_stems only."""
+def fit_keep_rule(index: StatsIndex, train_stems: list[str], scorer_version: str = "v1") -> dict:
+    """Gate -> scorer -> c, all on train_stems only. ``scorer_version="v2"``
+    (CODING_SPEC_06 E019) fits on the wider agreement-feature set with the
+    early-stopped HGB classifier instead."""
     tr_mask = index.stem_mask(train_stems)
     df = index.features_df
     best_gate, best_gate_pq = (0.0, 0.0), -1.0
@@ -493,7 +498,8 @@ def fit_keep_rule(index: StatsIndex, train_stems: list[str]) -> dict:
                 best_gate_pq, best_gate = pq, (me, ml)
     gate = gate_keep(df, *best_gate)
     train_rows = tr_mask[index.comp_stem]
-    scorer = sksc.fit_scorer(df[train_rows].reset_index(drop=True), seed=SEED)
+    feature_cols = skcomp.ALL_FEATURE_COLS_V2 if scorer_version == "v2" else skcomp.ALL_FEATURE_COLS
+    scorer = sksc.fit_scorer(df[train_rows].reset_index(drop=True), feature_cols=feature_cols, seed=SEED, version=scorer_version)
     scores = sksc.keep_score(scorer, df) if len(df) else np.zeros(0)
     best_c, best_c_pq = 0.0, -1.0
     for c in C_GRID:
@@ -512,6 +518,40 @@ def kept_labels_by_stem(index: StatsIndex, keep: np.ndarray, stems: list[str]) -
         sel = (index.comp_stem == i) & keep
         out[s] = [int(x) for x in labels[sel]]
     return out
+
+
+def day_split(stems: list[str], day_by_stem: dict[str, str], val_frac: float = 0.2, seed: int = SEED) -> tuple[list[str], list[str]]:
+    """Whole days shuffled into an inner train/val split (CODING_SPEC_06
+    E019's "day-grouped inner split" for choosing the scorer version)."""
+    by_day = collections.defaultdict(list)
+    for s in sorted(stems):
+        by_day[day_by_stem[s]].append(s)
+    days = sorted(by_day)
+    order = np.random.RandomState(seed).permutation(len(days))
+    n_val_target = round(len(stems) * val_frac)
+    val, train = [], []
+    for i in order:
+        group = by_day[days[i]]
+        if len(val) < n_val_target:
+            val.extend(group)
+        else:
+            train.extend(group)
+    return sorted(train), sorted(val)
+
+
+def choose_scorer_version(index: StatsIndex, train_stems: list[str], day_by_stem: dict[str, str], log=print) -> tuple[str, dict]:
+    """CODING_SPEC_06 E019: current scorer vs scorer v2, chosen on a
+    day-grouped inner split of the P5 train portion only."""
+    inner_train, inner_val = day_split(train_stems, day_by_stem)
+    if not inner_val or not inner_train:
+        return "v1", {}
+    results = {}
+    for version in ("v1", "v2"):
+        rule = fit_keep_rule(index, inner_train, scorer_version=version)
+        results[version] = round(float(index.pq(rule["keep"], index.stem_mask(inner_val))), 4)
+    best = max(results, key=results.get)
+    log(f"  scorer selection (inner val PQ): {results} -> {best}")
+    return best, results
 
 
 def choose_regrow(runner: Runner, cfg: skpp.PostprocessConfig, kept: dict[str, list[int]], stems: list[str], weights: tuple[float, ...] | None = None, log=print) -> tuple[tuple[float, int], float, list[float]]:
@@ -534,6 +574,7 @@ def run_p5(
     workers: int = 3,
     cv_folds: list[int] | None = None,
     weight_grid: list[tuple[float, ...]] | None = None,
+    scorer_grid: bool = False,
     log=print,
 ) -> P5Result:
     stems = sorted(stems)
@@ -544,6 +585,7 @@ def run_p5(
         stats = None if weight_grid else cfg1_stats(runner, stems, None, log)
         result = P5Result()
         image_rows = []
+        fn_detail_rows = []
         for i, (train, held) in enumerate(splits):
             if cv_folds is not None and i not in cv_folds:
                 continue
@@ -554,9 +596,13 @@ def run_p5(
                 w = None
                 cfg1, cfg1_pq = choose_cfg1(stats, train)
                 log(f"CV fold {i}: cfg1={cfg_key(cfg1)} (train PQ {cfg1_pq:.4f})")
-            tables = component_tables(runner, stems, cfg1, w, log)
+            tables = component_tables(runner, stems, cfg1, w, scorer_grid, log)
             index = StatsIndex([tables[s] for s in stems])
-            rule = fit_keep_rule(index, train)
+            if scorer_grid:
+                scorer_version, scorer_selection = choose_scorer_version(index, train, day_by_stem, log)
+            else:
+                scorer_version, scorer_selection = "v1", {}
+            rule = fit_keep_rule(index, train, scorer_version=scorer_version)
             kept = kept_labels_by_stem(index, rule["keep"], stems)
             sub = day_grouped_subsample(train, day_by_stem)
             (t_mask, d), regrow_pq, regrow_pqs = choose_regrow(runner, cfg1, kept, sub, w, log)
@@ -565,6 +611,9 @@ def run_p5(
             results = [r for s in held for r in final[s]]
             summ = skeval.aggregate_evaluation(results, quartile_edges=quartile_edges, noisy_stems=set())
             o = summ.overall
+            fn_rows = summ.details_df[summ.details_df["kind"] == "fn"]
+            for size in fn_rows["size"]:
+                fn_detail_rows.append({"cv_fold": i, "size": size})
             for s in held:
                 m = skmetric.aggregate_matches([r.match for r in final[s]])
                 image_rows.append({"stem": s, "cv_fold": i, "model_fold": fold_by_stem[s], "day": day_by_stem[s],
@@ -573,6 +622,7 @@ def run_p5(
                 "cv_fold": i, "n_train": len(train), "n_held": len(held),
                 "weights": list(w) if w else None,
                 "cfg1": {k: v for k, v in cfg1.__dict__.items()}, "cfg1_train_pq": round(cfg1_pq, 6),
+                "scorer_version": scorer_version, "scorer_selection": scorer_selection,
                 "shape_gate": rule["shape_gate"], "scorer_c": rule["scorer_c"],
                 "regrow_t_mask": t_mask, "regrow_d": d, "regrow_n_images": len(sub), "regrow_grid_pq": regrow_pqs,
                 "pq": round(o.pq, 4), "sq": round(o.sq, 4), "rq": round(o.rq, 4), "tp": o.tp, "fp": o.fp, "fn": o.fn,
@@ -584,6 +634,9 @@ def run_p5(
             result.per_fold.append(fold)
         result.per_image = pd.DataFrame(image_rows)
         result.summary = summarise(result.per_fold)
+        if fn_detail_rows:
+            fn_df = pd.DataFrame(fn_detail_rows)
+            result.summary["fn_by_size_quartile"] = fn_df["size"].value_counts().to_dict()
         return result
     finally:
         runner.close()

@@ -127,6 +127,62 @@ def test_cv_grid_has_66_configs():
     assert len({cvp.cfg_key(c) for c in cvp.CFG1_GRID}) == 66
 
 
+def test_agreement_features_match_manual_computation_on_toy_members():
+    # One component (a 3x4 block); two toy "members" with known per-pixel
+    # probabilities under it, so agree_mean/min/max/std and the majority
+    # fraction can be checked against a hand computation.
+    mask = np.zeros((20, 20), dtype=np.uint8)
+    mask[5:8, 5:9] = 1
+    avg_probs = np.full((20, 20), 0.5, dtype=np.float32)
+    member_a = np.full((20, 20), 0.9, dtype=np.float32)  # all of mask > 0.5
+    member_b = np.full((20, 20), 0.2, dtype=np.float32)  # none of mask > 0.5
+    feats = skcomp._agreement_features(mask, {"A": member_a, "B": member_b}, avg_probs)
+    assert feats["agree_mean"] == pytest.approx(0.55)
+    assert feats["agree_min"] == pytest.approx(0.2)
+    assert feats["agree_max"] == pytest.approx(0.9)
+    assert feats["agree_std"] == pytest.approx(0.35)
+    assert feats["agree_frac_majority"] == pytest.approx(0.5)  # only member A clears 50%
+
+
+def test_agreement_features_without_member_probs_is_nan_but_ring_still_set():
+    mask = np.zeros((20, 20), dtype=np.uint8)
+    mask[5:8, 5:9] = 1
+    avg_probs = np.random.RandomState(0).rand(20, 20).astype(np.float32)
+    feats = skcomp._agreement_features(mask, None, avg_probs)
+    assert np.isnan(feats["agree_mean"])
+    assert not np.isnan(feats["boundary_ring_prob"])
+
+
+def test_extract_components_v2_columns_present_and_nan_without_members():
+    probs, processed, disk_info, gt = _synthetic_image(2)
+    cfg = skpp.PostprocessConfig(mode="threshold", t=0.5, closing_radius=1, min_area=1)
+    feats, _ = skcomp.extract_components("x", probs, processed, disk_info, cvp.components_cfg(cfg))
+    df = skcomp.to_dataframe(feats)
+    for col in skcomp.AGREEMENT_FEATURE_COLS:
+        assert col in df.columns
+    assert df["agree_mean"].isna().all()
+
+
+def test_day_split_is_seeded_day_grouped_and_disjoint():
+    day = {f"s{i:03d}": f"d{i // 7}" for i in range(400)}
+    train_a, val_a = cvp.day_split(list(day), day, val_frac=0.2, seed=0)
+    train_b, val_b = cvp.day_split(list(reversed(list(day))), day, val_frac=0.2, seed=0)
+    assert train_a == train_b and val_a == val_b
+    assert set(train_a).isdisjoint(val_a)
+    assert set(train_a) | set(val_a) == set(day)
+    for s in val_a:
+        assert day[s] not in {day[t] for t in train_a}
+
+
+def test_choose_scorer_version_returns_v1_or_v2_with_selection_scores():
+    data = _tables_and_preds(n_images=10)
+    index = cvp.StatsIndex([t for t, _, _ in data])
+    day_by_stem = {f"img{i}": f"d{i % 3}" for i in range(10)}
+    version, selection = cvp.choose_scorer_version(index, index.stems, day_by_stem, log=lambda *a: None)
+    assert version in ("v1", "v2")
+    assert set(selection) == {"v1", "v2"}
+
+
 def test_day_grouped_subsample_is_seeded_and_day_grouped():
     day = {f"s{i:03d}": f"d{i // 7}" for i in range(400)}
     a = cvp.day_grouped_subsample(list(day), day, 150, seed=0)

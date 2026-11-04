@@ -85,6 +85,13 @@ def load_oof_mean(members: list[str], stem: str, fold_by_stem: dict[str, int], w
     return mean_of(oof_sources(members, stem, fold_by_stem), weights)
 
 
+def load_oof_members(members: list[str], stem: str, fold_by_stem: dict[str, int]) -> dict[str, np.ndarray]:
+    """CODING_SPEC_06 E019: each member's own OOF map for ``stem`` (the
+    fold-matched member set), for agreement features -- never any other
+    fold's map, same restriction as ``oof_sources``."""
+    return {m: load_prob_png(p) for m, p in zip(members, oof_sources(members, stem, fold_by_stem))}
+
+
 def load_test_mean(members: list[str], stem: str, folds: list[int] | None = None, weights: list[float] | None = None) -> np.ndarray:
     """``weights``, if given, is one weight per *member* (not per map); it is
     expanded across that member's folds, matching ``test_sources``' member-outer,

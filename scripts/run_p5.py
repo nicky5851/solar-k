@@ -141,6 +141,9 @@ def main() -> None:
                      help="CODING_SPEC_06 E018: one or more comma-separated per-member weight vectors "
                           "(aligned with --members order), e.g. --weight-grid 0,0.5,0.5 0.15,0.425,0.425 0.3,0.35,0.35. "
                           "Chosen inside each CV fold's train portion jointly with cfg1.")
+    ap.add_argument("--scorer-grid", action="store_true",
+                     help="CODING_SPEC_06 E019: choose current scorer vs scorer v2 (agreement features + "
+                          "early-stopped HGB) on a day-grouped inner split of each CV fold's train portion.")
     args = ap.parse_args()
 
     weight_grid = None
@@ -167,11 +170,12 @@ def main() -> None:
     log(f"{args.experiment}: members={args.members} images={len(stems)} model folds={model_folds_present}")
 
     res = cvp.run_p5(args.members, stems, day_by_stem, site_by_stem, disk_info_by_stem, quartile_edges,
-                     workers=args.workers, cv_folds=args.cv_folds, weight_grid=weight_grid, log=log)
+                     workers=args.workers, cv_folds=args.cv_folds, weight_grid=weight_grid,
+                     scorer_grid=args.scorer_grid, log=log)
 
     per_image_path = INTERIM / f"{args.experiment}_p5_per_image.csv"
     res.per_image.to_csv(per_image_path, index=False)
-    cv_rows = [{k: v for k, v in f.items() if k not in ("loss_decomposition", "regrow_grid_pq")} | {"cfg1": cvp.cfg_key(skpp.PostprocessConfig.from_dict(f["cfg1"]))} for f in res.per_fold]
+    cv_rows = [{k: v for k, v in f.items() if k not in ("loss_decomposition", "regrow_grid_pq", "scorer_selection")} | {"cfg1": cvp.cfg_key(skpp.PostprocessConfig.from_dict(f["cfg1"]))} for f in res.per_fold]
     pd.DataFrame(cv_rows).to_csv(INTERIM / f"{args.experiment}_p5_cv.csv", index=False)
 
     summary = {

@@ -40,13 +40,21 @@ def _feature_matrix(df: pd.DataFrame, feature_cols: list[str]) -> np.ndarray:
     return df[feature_cols].fillna(0.0).to_numpy(dtype=np.float64)
 
 
-def fit_scorer(train_df: pd.DataFrame, feature_cols: list[str] = ALL_FEATURE_COLS, seed: int = 0) -> FittedScorer:
+def fit_scorer(train_df: pd.DataFrame, feature_cols: list[str] = ALL_FEATURE_COLS, seed: int = 0, version: str = "v1") -> FittedScorer:
+    """``version="v2"`` (CODING_SPEC_06 E019) swaps the match classifier for
+    ``HistGradientBoostingClassifier(random_state=seed, max_iter=300,
+    early_stopping=True)`` -- no depth cap, but early-stopped, so it can use
+    the wider (agreement-feature) ``feature_cols`` without overfitting the
+    small per-fold train portion."""
     X = _feature_matrix(train_df, feature_cols)
     y = train_df["is_tp"].to_numpy(dtype=int)
 
     scaler = StandardScaler().fit(X)
     logistic = LogisticRegression(max_iter=1000, random_state=seed).fit(scaler.transform(X), y)
-    hgb_clf = HistGradientBoostingClassifier(max_depth=3, random_state=seed).fit(X, y)
+    if version == "v2":
+        hgb_clf = HistGradientBoostingClassifier(random_state=seed, max_iter=300, early_stopping=True).fit(X, y)
+    else:
+        hgb_clf = HistGradientBoostingClassifier(max_depth=3, random_state=seed).fit(X, y)
 
     matched = train_df[train_df["is_tp"]]
     hgb_reg = None

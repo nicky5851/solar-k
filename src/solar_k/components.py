@@ -56,6 +56,14 @@ class ComponentFeatures:
     r_over_R: float
     is_tp: bool = False
     best_iou_by_annotator: dict[str, float] = field(default_factory=dict)
+    # CODING_SPEC_06 E019: cross-member agreement features, nan unless
+    # extract_components is given member_probs.
+    agree_mean: float = float("nan")
+    agree_min: float = float("nan")
+    agree_max: float = float("nan")
+    agree_std: float = float("nan")
+    agree_frac_majority: float = float("nan")
+    boundary_ring_prob: float = float("nan")
 
 
 def _bbox(mask: np.ndarray, pad: int, shape: tuple[int, int]) -> tuple[int, int, int, int] | None:
@@ -155,6 +163,34 @@ def _context_features(mask: np.ndarray, processed: np.ndarray, bright_threshold:
     }
 
 
+def _agreement_features(mask: np.ndarray, member_probs: dict[str, np.ndarray] | None, avg_probs: np.ndarray) -> dict:
+    """CODING_SPEC_06 E019 scorer v2: per-member agreement on this component,
+    plus a probability-map (not image-intensity) boundary-contrast feature.
+    ``member_probs`` comes only from the members that exist for this OOF
+    image (fold-matched) -- see CODING_SPEC_06's agreement-feature note."""
+    nan_out = {"agree_mean": float("nan"), "agree_min": float("nan"), "agree_max": float("nan"),
+               "agree_std": float("nan"), "agree_frac_majority": float("nan"), "boundary_ring_prob": float("nan")}
+    if not mask.any():
+        return nan_out
+    ring = cv2.dilate(mask, np.ones((3, 3), np.uint8)) & (1 - mask)
+    boundary_ring_prob = float(avg_probs[ring.astype(bool)].mean()) if ring.any() else float("nan")
+    if not member_probs:
+        return {**nan_out, "boundary_ring_prob": boundary_ring_prob}
+    mask_bool = mask.astype(bool)
+    member_means, majority_flags = [], []
+    for probs in member_probs.values():
+        vals = probs[mask_bool]
+        member_means.append(float(vals.mean()))
+        majority_flags.append(float((vals > 0.5).mean() >= 0.5))
+    arr = np.array(member_means)
+    return {
+        "agree_mean": float(arr.mean()), "agree_min": float(arr.min()), "agree_max": float(arr.max()),
+        "agree_std": float(arr.std()) if len(arr) > 1 else 0.0,
+        "agree_frac_majority": float(np.mean(majority_flags)),
+        "boundary_ring_prob": boundary_ring_prob,
+    }
+
+
 def _r_over_r(mask: np.ndarray, cx: float, cy: float, radius: float) -> float:
     ys, xs = np.nonzero(mask)
     if len(ys) == 0 or radius <= 0:
@@ -168,6 +204,7 @@ def extract_components(
     processed: np.ndarray,
     disk_info: tuple[float, float, float],
     cfg: skpp.PostprocessConfig,
+    member_probs: dict[str, np.ndarray] | None = None,
 ) -> tuple[list[ComponentFeatures], np.ndarray]:
     """Binarize -> close -> connected components (``cfg``'s mode/t/closing_radius;
     ``cfg.min_area``/``cfg.max_instances`` are ignored here on purpose -- the
@@ -196,11 +233,12 @@ def extract_components(
         shape_feats = _shape_features(mask[y0 : y1 + 1, x0 : x1 + 1])
         prob_feats = _prob_features(mask, probs)
         ctx_feats = _context_features(mask, processed, bright_threshold)
+        agree_feats = _agreement_features(mask, member_probs, probs)
         out.append(
             ComponentFeatures(
                 stem=stem, label=label,
                 r_over_R=_r_over_r(mask, cx, cy, radius),
-                **shape_feats, **prob_feats, **ctx_feats,
+                **shape_feats, **prob_feats, **ctx_feats, **agree_feats,
             )
         )
     return out, labels
@@ -259,6 +297,10 @@ PROB_FEATURE_COLS = ["prob_mean", "prob_max", "prob_p90"]
 CONTEXT_FEATURE_COLS = ["local_intensity", "ring_intensity", "contrast", "texture_std", "frac_bright_nearby"]
 POSITION_FEATURE_COLS = ["r_over_R"]
 ALL_FEATURE_COLS = SHAPE_FEATURE_COLS + PROB_FEATURE_COLS + CONTEXT_FEATURE_COLS + POSITION_FEATURE_COLS
+# CODING_SPEC_06 E019 scorer v2: agreement features, nan unless member_probs
+# was supplied to extract_components.
+AGREEMENT_FEATURE_COLS = ["agree_mean", "agree_min", "agree_max", "agree_std", "agree_frac_majority", "boundary_ring_prob"]
+ALL_FEATURE_COLS_V2 = ALL_FEATURE_COLS + AGREEMENT_FEATURE_COLS
 
 
 def to_dataframe(features: list[ComponentFeatures]) -> pd.DataFrame:
@@ -268,5 +310,5 @@ def to_dataframe(features: list[ComponentFeatures]) -> pd.DataFrame:
         best_iou_by_annotator = d.pop("best_iou_by_annotator")
         d["best_iou"] = max(best_iou_by_annotator.values()) if best_iou_by_annotator else 0.0
         rows.append(d)
-    cols = ["stem", "label", *ALL_FEATURE_COLS, "is_tp", "best_iou"]
+    cols = ["stem", "label", *ALL_FEATURE_COLS_V2, "is_tp", "best_iou"]
     return pd.DataFrame(rows, columns=cols)
