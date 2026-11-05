@@ -129,3 +129,30 @@ def test_tta_views_3_reproduces_existing_output():
     assert np.array_equal(sku.make_prob_fn(model, dev, tta_views=3)(x, disk), ref)
     four = sku.make_prob_fn(model, dev, tta_views=4)(x, disk)
     assert four.shape == ref.shape and not np.array_equal(four, ref)
+
+
+def test_tta_scales_default_reproduces_existing_output():
+    model = _Asym().eval()
+    dev = torch.device("cpu")
+    x = np.random.RandomState(0).rand(32, 48).astype(np.float32)
+    disk = np.ones_like(x, dtype=bool)
+    ref = _old_prob_fn(model, dev)(x, disk)
+    assert np.array_equal(sku.make_prob_fn(model, dev, tta_scales=(1.0,))(x, disk), ref)
+
+
+def test_tta_scales_with_upscale_changes_output_same_shape():
+    model = _Asym().eval()
+    dev = torch.device("cpu")
+    x = np.random.RandomState(0).rand(32, 48).astype(np.float32)
+    disk = np.ones_like(x, dtype=bool)
+    ref = sku.make_prob_fn(model, dev)(x, disk)
+    scaled = sku.make_prob_fn(model, dev, tta_scales=(1.0, 1.25))(x, disk)
+    assert scaled.shape == ref.shape
+    assert not np.array_equal(scaled, ref)
+
+
+def test_tta_scales_rejects_downscaling():
+    model = _Asym().eval()
+    dev = torch.device("cpu")
+    with pytest.raises(ValueError):
+        sku.make_prob_fn(model, dev, tta_scales=(0.8,))

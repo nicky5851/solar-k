@@ -9,6 +9,7 @@ from __future__ import annotations
 import random
 from pathlib import Path
 
+import cv2
 import numpy as np
 import segmentation_models_pytorch as smp
 import torch
@@ -150,29 +151,49 @@ def infer_tiled(model: torch.nn.Module, device: torch.device, arr: np.ndarray, t
 
 def make_prob_fn(
     model: torch.nn.Module, device: torch.device, tta_flips: bool = True, tile_size: int | None = None, overlap: int = 128,
-    tta_views: int = 3,
+    tta_views: int = 3, tta_scales: tuple[float, ...] = (1.0,),
 ):
-    """Flip TTA. ``tta_views`` (CODING_SPEC_05_ENSEMBLE.md E014): 3 = identity +
-    h-flip + v-flip (the default every saved E004/E006/E007 map used, kept
-    bit-for-bit), 4 = those plus the h+v flip. ``tta_flips=False`` -> 1 view."""
+    """Flip + scale TTA. ``tta_views`` (CODING_SPEC_05_ENSEMBLE.md E014): 3 =
+    identity + h-flip + v-flip (the default every saved E004/E006/E007 map
+    used, kept bit-for-bit), 4 = those plus the h+v flip. ``tta_flips=False``
+    -> 1 view. ``tta_scales`` (CODING_SPEC_06 E023): each scale >= 1.0 is run
+    by upscaling the input, inferring, then downscaling the *probability map*
+    back to the original resolution before averaging -- upscaling only, never
+    downscaling the input itself, since that destroys 2-px-wide filaments.
+    Default ``(1.0,)`` reproduces the pre-E023 output exactly."""
     if tta_views not in (3, 4):
         raise ValueError(f"tta_views must be 3 or 4, got {tta_views}")
+    if any(s < 1.0 for s in tta_scales):
+        raise ValueError(f"tta_scales must be >= 1.0 (upscaling only), got {tta_scales}")
 
     def infer(arr: np.ndarray) -> np.ndarray:
         if tile_size is not None:
             return infer_tiled(model, device, arr, tile_size, overlap)
         return _infer_once(model, device, arr)
 
+    def infer_at_scale(arr: np.ndarray, scale: float) -> np.ndarray:
+        if scale == 1.0:
+            return infer(arr)
+        h, w = arr.shape
+        nh, nw = max(1, int(round(h * scale))), max(1, int(round(w * scale)))
+        up = cv2.resize(arr, (nw, nh), interpolation=cv2.INTER_LINEAR)
+        probs_up = infer(up)
+        return cv2.resize(probs_up, (w, h), interpolation=cv2.INTER_LINEAR)
+
     def prob_fn(processed: np.ndarray, disk_mask: np.ndarray) -> np.ndarray:
-        probs = infer(processed)
-        if tta_flips:
-            probs_h = infer(processed[:, ::-1])[:, ::-1]
-            probs_v = infer(processed[::-1, :])[::-1, :]
-            if tta_views == 4:
-                probs_hv = infer(processed[::-1, ::-1])[::-1, ::-1]
-                probs = (probs + probs_h + probs_v + probs_hv) / 4.0
-            else:
-                probs = (probs + probs_h + probs_v) / 3.0
+        scale_probs = []
+        for scale in tta_scales:
+            probs = infer_at_scale(processed, scale)
+            if tta_flips:
+                probs_h = infer_at_scale(processed[:, ::-1], scale)[:, ::-1]
+                probs_v = infer_at_scale(processed[::-1, :], scale)[::-1, :]
+                if tta_views == 4:
+                    probs_hv = infer_at_scale(processed[::-1, ::-1], scale)[::-1, ::-1]
+                    probs = (probs + probs_h + probs_v + probs_hv) / 4.0
+                else:
+                    probs = (probs + probs_h + probs_v) / 3.0
+            scale_probs.append(probs)
+        probs = scale_probs[0] if len(scale_probs) == 1 else sum(scale_probs) / len(scale_probs)
         return probs * disk_mask.astype(np.float32)
 
     return prob_fn
