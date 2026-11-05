@@ -34,8 +34,8 @@ checkpoint_select_by: pq
 n_pq_val_images: 40
 # RunPod pod CPU count is unknown ahead of time -- setup_remote.sh prints
 # nproc; raise these to match if the pod has more than 4 cores available.
-num_workers: 4
-cache_workers: 4
+num_workers: 8
+cache_workers: 8
 prebuild_cache: true
 save_oof_and_test_probs: true
 infer_tile_size: 1024
