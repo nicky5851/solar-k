@@ -74,6 +74,10 @@ LEN_GRID = [0.0, 5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 40.0, 50.0]
 C_GRID = [round(x, 3) for x in np.arange(0.0, 0.525, 0.025)]
 REGROW_GRID = [(t_mask, d) for t_mask in (0.4, 0.5, 0.6) for d in (4, 6, 8)]
 REGROW_MAX_IMAGES = 150
+# CODING_SPEC_06 E022: fragment merging, tuned after regrow on the same
+# subsample. g=max endpoint gap (px), theta=max direction misalignment
+# (degrees), p=min mean connecting-path probability.
+MERGE_GRID = [(g, theta, p) for g in (5, 10, 20) for theta in (20, 40) for p in (0.2, 0.3)]
 SEED = 0
 
 
@@ -365,12 +369,28 @@ def _job_regrow(args):
     return stem, out
 
 
-def _job_final(args):
-    stem, cfg_dict, kept_labels, t_mask, d, disk_info, site, weights = args
+def _job_merge(args):
+    stem, cfg_dict, kept_labels, t_mask, d, grid, weights = args
     cfg = skpp.PostprocessConfig.from_dict(cfg_dict)
     probs = _probs(stem, weights)
     seeds = _kept_masks(probs, cfg, kept_labels)
-    pred = _stack(skpp.regrow_instances(probs, seeds, t_mask, d) if seeds else [])
+    grown = skpp.regrow_instances(probs, seeds, t_mask, d) if seeds else []
+    gt = _sparse_gt(_gt(stem))
+    out = np.zeros((len(grid), 4), dtype=np.float64)
+    for i, (g, theta, p) in enumerate(grid):
+        merged = skpp.merge_fragments(probs, grown, g, theta, p) if grown else []
+        out[i] = match_stats(gt, _stack(merged))
+    return stem, out
+
+
+def _job_final(args):
+    stem, cfg_dict, kept_labels, t_mask, d, merge_params, disk_info, site, weights = args
+    cfg = skpp.PostprocessConfig.from_dict(cfg_dict)
+    probs = _probs(stem, weights)
+    seeds = _kept_masks(probs, cfg, kept_labels)
+    grown = skpp.regrow_instances(probs, seeds, t_mask, d) if seeds else []
+    merged = skpp.merge_fragments(probs, grown, *merge_params) if grown and merge_params else grown
+    pred = _stack(merged)
     results = [
         skeval.evaluate_annotator_image(stem, a, pred, g, disk_info=disk_info, site=site, compute_pixel_metrics=True)
         for a, g in _gt(stem).items()
@@ -564,6 +584,18 @@ def choose_regrow(runner: Runner, cfg: skpp.PostprocessConfig, kept: dict[str, l
     return REGROW_GRID[i], float(pqs[i]), [round(p, 6) for p in pqs]
 
 
+def choose_merge(runner: Runner, cfg: skpp.PostprocessConfig, kept: dict[str, list[int]], t_mask: float, d: int, stems: list[str], weights: tuple[float, ...] | None = None, log=print) -> tuple[tuple[float, float, float], float, list[float]]:
+    """CODING_SPEC_06 E022: pick (g, theta, p) from MERGE_GRID by PQ, applied
+    after regrow on the same tune subsample."""
+    res = runner.map(_job_merge, [(s, cfg.__dict__, kept[s], t_mask, d, MERGE_GRID, weights) for s in stems], log, "merge")
+    total = np.zeros((len(MERGE_GRID), 4))
+    for s in sorted(stems):
+        total += res[s]
+    pqs = [pq_of(*row) for row in total]
+    i = int(np.argmax(pqs))
+    return MERGE_GRID[i], float(pqs[i]), [round(p, 6) for p in pqs]
+
+
 def run_p5(
     members: list[str],
     stems: list[str],
@@ -575,6 +607,7 @@ def run_p5(
     cv_folds: list[int] | None = None,
     weight_grid: list[tuple[float, ...]] | None = None,
     scorer_grid: bool = False,
+    enable_merge: bool = False,
     log=print,
 ) -> P5Result:
     stems = sorted(stems)
@@ -606,8 +639,14 @@ def run_p5(
             kept = kept_labels_by_stem(index, rule["keep"], stems)
             sub = day_grouped_subsample(train, day_by_stem)
             (t_mask, d), regrow_pq, regrow_pqs = choose_regrow(runner, cfg1, kept, sub, w, log)
-            log(f"  gate={rule['shape_gate']} c={rule['scorer_c']} regrow=({t_mask},{d}) weights={weight_tag(w)} on {len(sub)} imgs")
-            final = runner.map(_job_final, [(s, cfg1.__dict__, kept[s], t_mask, d, disk_info_by_stem[s], site_by_stem[s], w) for s in held], log, "held-out")
+            if enable_merge:
+                (g, theta, p), merge_pq, merge_pqs = choose_merge(runner, cfg1, kept, t_mask, d, sub, w, log)
+                merge_params = (g, theta, p)
+            else:
+                g, theta, p, merge_pq, merge_pqs = None, None, None, None, None
+                merge_params = None
+            log(f"  gate={rule['shape_gate']} c={rule['scorer_c']} regrow=({t_mask},{d}) merge={merge_params} weights={weight_tag(w)} on {len(sub)} imgs")
+            final = runner.map(_job_final, [(s, cfg1.__dict__, kept[s], t_mask, d, merge_params, disk_info_by_stem[s], site_by_stem[s], w) for s in held], log, "held-out")
             results = [r for s in held for r in final[s]]
             summ = skeval.aggregate_evaluation(results, quartile_edges=quartile_edges, noisy_stems=set())
             o = summ.overall
@@ -625,6 +664,7 @@ def run_p5(
                 "scorer_version": scorer_version, "scorer_selection": scorer_selection,
                 "shape_gate": rule["shape_gate"], "scorer_c": rule["scorer_c"],
                 "regrow_t_mask": t_mask, "regrow_d": d, "regrow_n_images": len(sub), "regrow_grid_pq": regrow_pqs,
+                "merge_g": g, "merge_theta": theta, "merge_p": p, "merge_grid_pq": merge_pqs,
                 "pq": round(o.pq, 4), "sq": round(o.sq, 4), "rq": round(o.rq, 4), "tp": o.tp, "fp": o.fp, "fn": o.fn,
                 "pixel_dice_mean": round(summ.pixel_dice_mean, 4) if summ.pixel_dice_mean is not None else None,
                 "loss_decomposition": summ.loss_decomposition,

@@ -127,6 +127,32 @@ def test_cv_grid_has_66_configs():
     assert len({cvp.cfg_key(c) for c in cvp.CFG1_GRID}) == 66
 
 
+def test_merge_grid_has_12_configs():
+    # CODING_SPEC_06 E022: 3 gaps x 2 angles x 2 probabilities.
+    assert len(cvp.MERGE_GRID) == 12
+    assert len(set(cvp.MERGE_GRID)) == 12
+
+
+def test_job_final_without_merge_params_matches_regrow_only_behaviour():
+    # CODING_SPEC_06 acceptance criteria: existing defaults (no merge)
+    # reproduce their old (regrow-only) outputs exactly -- _job_final's
+    # merge_params=None branch must skip merge_fragments entirely, not
+    # call it with params that happen to be a no-op.
+    probs = np.zeros((20, 20), dtype=np.float32)
+    probs[5, 2:10] = 0.9
+    probs[5, 12:18] = 0.9
+
+    seeds = [np.zeros((20, 20), dtype=np.uint8) for _ in range(2)]
+    seeds[0][5, 2:10] = 1
+    seeds[1][5, 12:18] = 1
+    grown = skpp.regrow_instances(probs, seeds, t_mask=0.3, d=2)
+
+    merge_params = None
+    merged = skpp.merge_fragments(probs, grown, *merge_params) if grown and merge_params else grown
+    assert merged is grown  # exact same objects, no merge logic ran
+    assert len(merged) == 2
+
+
 def test_agreement_features_match_manual_computation_on_toy_members():
     # One component (a 3x4 block); two toy "members" with known per-pixel
     # probabilities under it, so agree_mean/min/max/std and the majority

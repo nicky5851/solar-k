@@ -173,3 +173,81 @@ def test_regrow_instances_does_not_merge_adjacent_instances():
     overlap = grown[0].astype(bool) & grown[1].astype(bool)
     assert not overlap.any()  # exclusive masks: no pixel claimed by both
     assert grown[0][5, 5] == 1 and grown[1][5, 10] == 1  # each still contains its own seed
+
+
+def _h_segment(h, w, y, x0, x1, prob=1.0):
+    probs = np.zeros((h, w), dtype=np.float32)
+    mask = np.zeros((h, w), dtype=np.uint8)
+    probs[y, x0:x1 + 1] = prob
+    mask[y, x0:x1 + 1] = 1
+    return probs, mask
+
+
+def test_merge_fragments_joins_close_aligned_high_probability_gap():
+    h, w = 20, 40
+    probs_a, mask_a = _h_segment(h, w, 10, 2, 10)
+    probs_b, mask_b = _h_segment(h, w, 10, 15, 25)
+    probs = np.maximum(probs_a, probs_b)
+    probs[10, 11:15] = 0.9  # the connecting gap, high probability
+
+    merged = pp.merge_fragments(probs, [mask_a, mask_b], g=10, theta=20, p=0.5)
+    assert len(merged) == 1
+    assert merged[0][10, 10] == 1 and merged[0][10, 15] == 1
+    assert merged[0][10, 12] == 1  # the bridge itself is filled in
+
+
+def test_merge_fragments_does_not_join_far_apart_fragments():
+    h, w = 20, 60
+    probs_a, mask_a = _h_segment(h, w, 10, 2, 10)
+    probs_b, mask_b = _h_segment(h, w, 10, 35, 45)
+    probs = np.maximum(probs_a, probs_b)
+    probs[10, 10:35] = 0.9  # high probability, but the endpoints are 25px apart
+
+    merged = pp.merge_fragments(probs, [mask_a, mask_b], g=10, theta=20, p=0.5)
+    assert len(merged) == 2  # gap (25px) exceeds g=10
+
+
+def test_merge_fragments_does_not_join_misaligned_endpoints():
+    h, w = 30, 30
+    mask_a = np.zeros((h, w), dtype=np.uint8)
+    mask_a[5:15, 10] = 1  # vertical segment, endpoint pointing down at (14, 10)
+    mask_b = np.zeros((h, w), dtype=np.uint8)
+    mask_b[15, 12:20] = 1  # horizontal segment starting near (15, 12), running sideways
+    probs = np.full((h, w), 0.9, dtype=np.float32)
+
+    merged = pp.merge_fragments(probs, [mask_a, mask_b], g=10, theta=20, p=0.5)
+    assert len(merged) == 2  # endpoints are close but the turn is far outside theta=20
+
+
+def test_merge_fragments_does_not_join_low_probability_gap():
+    h, w = 20, 40
+    probs_a, mask_a = _h_segment(h, w, 10, 2, 10)
+    probs_b, mask_b = _h_segment(h, w, 10, 15, 25)
+    probs = np.maximum(probs_a, probs_b)
+    probs[10, 11:15] = 0.05  # the connecting gap, low probability
+
+    merged = pp.merge_fragments(probs, [mask_a, mask_b], g=10, theta=20, p=0.5)
+    assert len(merged) == 2  # path probability (0.05) is below p=0.5
+
+
+def test_merge_fragments_chains_three_collinear_fragments():
+    h, w = 20, 60
+    probs_a, mask_a = _h_segment(h, w, 10, 2, 10)
+    probs_b, mask_b = _h_segment(h, w, 10, 14, 22)
+    probs_c, mask_c = _h_segment(h, w, 10, 26, 34)
+    probs = np.maximum(np.maximum(probs_a, probs_b), probs_c)
+    probs[10, 10:14] = 0.9
+    probs[10, 22:26] = 0.9
+
+    merged = pp.merge_fragments(probs, [mask_a, mask_b, mask_c], g=10, theta=20, p=0.5)
+    assert len(merged) == 1
+    assert merged[0][10, 2] == 1 and merged[0][10, 34] == 1
+
+
+def test_merge_fragments_single_instance_passthrough():
+    probs = np.full((10, 10), 0.9, dtype=np.float32)
+    mask = np.zeros((10, 10), dtype=np.uint8)
+    mask[5, 2:8] = 1
+    merged = pp.merge_fragments(probs, [mask], g=10, theta=20, p=0.5)
+    assert len(merged) == 1
+    np.testing.assert_array_equal(merged[0], mask)

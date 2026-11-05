@@ -13,6 +13,7 @@ import cv2
 import numpy as np
 import scipy.sparse as sp
 from skimage.filters import apply_hysteresis_threshold
+from skimage.morphology import skeletonize
 from skimage.segmentation import watershed
 
 
@@ -147,3 +148,124 @@ def regrow_instances(probs: np.ndarray, seed_masks: list[np.ndarray], t_mask: fl
     region = allowed & ((probs >= t_mask) | (markers > 0))
     labels_grown = watershed(-probs, markers=markers, mask=region)
     return [(labels_grown == i).astype(np.uint8) for i in range(1, n + 1)]
+
+
+def _skeleton_graph(mask: np.ndarray) -> tuple[set[tuple[int, int]], list[tuple[int, int]]]:
+    """1-px skeleton pixel coordinates, plus its endpoints (skeleton pixels
+    with at most one 8-connected skeleton neighbour)."""
+    skel = skeletonize(mask.astype(bool))
+    ys, xs = np.nonzero(skel)
+    pts = set(zip(ys.tolist(), xs.tolist()))
+    endpoints = [
+        (y, x) for y, x in pts
+        if sum((y + dy, x + dx) in pts for dy in (-1, 0, 1) for dx in (-1, 0, 1) if (dy, dx) != (0, 0)) <= 1
+    ]
+    return pts, endpoints
+
+
+def _endpoint_direction(pts: set[tuple[int, int]], endpoint: tuple[int, int], reach: int = 5) -> np.ndarray:
+    """Outward unit direction at a skeleton endpoint: BFS up to ``reach``
+    skeleton pixels inward, then point from that inward pixel back out to
+    the endpoint -- the direction the filament would continue past it."""
+    visited = {endpoint}
+    frontier = [endpoint]
+    last = endpoint
+    for _ in range(reach):
+        nxt = [
+            (y + dy, x + dx)
+            for (y, x) in frontier
+            for dy in (-1, 0, 1) for dx in (-1, 0, 1)
+            if (dy, dx) != (0, 0) and (y + dy, x + dx) in pts and (y + dy, x + dx) not in visited
+        ]
+        if not nxt:
+            break
+        visited.update(nxt)
+        frontier = nxt
+        last = frontier[0]
+    vec = np.array([endpoint[0] - last[0], endpoint[1] - last[1]], dtype=np.float64)
+    norm = np.linalg.norm(vec)
+    return vec / norm if norm > 0 else vec
+
+
+def _angle_between(u: np.ndarray, v: np.ndarray) -> float:
+    nu, nv = np.linalg.norm(u), np.linalg.norm(v)
+    if nu == 0 or nv == 0:
+        return 180.0
+    cos = np.clip(np.dot(u, v) / (nu * nv), -1.0, 1.0)
+    return float(np.degrees(np.arccos(cos)))
+
+
+def _path_mean_prob(probs: np.ndarray, a: tuple[int, int], b: tuple[int, int]) -> float:
+    n = max(int(round(float(np.hypot(b[0] - a[0], b[1] - a[1])))), 1)
+    ys = np.clip(np.linspace(a[0], b[0], n + 1).round().astype(int), 0, probs.shape[0] - 1)
+    xs = np.clip(np.linspace(a[1], b[1], n + 1).round().astype(int), 0, probs.shape[1] - 1)
+    return float(probs[ys, xs].mean())
+
+
+def merge_fragments(probs: np.ndarray, instance_masks: list[np.ndarray], g: float, theta: float, p: float) -> list[np.ndarray]:
+    """CODING_SPEC_06 E022: join fragments of the same filament that the
+    detector split into separate instances.
+
+    For every pair of kept instances, find their closest pair of skeleton
+    endpoints (ties broken by lower distance); merge iff (1) the endpoints
+    are within ``g`` px, (2) each endpoint's local skeleton direction
+    points toward the other endpoint within ``theta`` degrees -- a
+    straight-line-continuation test, not just proximity, so a `T`
+    junction's side branch doesn't get joined to the stem -- and (3) the
+    mean ensemble probability along the straight connecting path is
+    ``>= p``. Merging is transitive (union-find), so a chain of 3+
+    collinear fragments all end up in one instance. The connecting path is
+    drawn into the merged mask (1px line) so it stays one connected
+    component.
+    """
+    n = len(instance_masks)
+    if n <= 1:
+        return list(instance_masks)
+
+    endpoints_by_inst = []
+    for m in instance_masks:
+        pts, eps = _skeleton_graph(m)
+        endpoints_by_inst.append([(ep, _endpoint_direction(pts, ep)) for ep in eps])
+
+    parent = list(range(n))
+
+    def find(x):
+        while parent[x] != x:
+            x = parent[x]
+        return x
+
+    def union(x, y):
+        rx, ry = find(x), find(y)
+        if rx != ry:
+            parent[rx] = ry
+
+    bridges = []  # (i, j, point_on_i, point_on_j)
+    for i in range(n):
+        for j in range(i + 1, n):
+            best = None
+            for a, da in endpoints_by_inst[i]:
+                for b, db in endpoints_by_inst[j]:
+                    dist = float(np.hypot(a[0] - b[0], a[1] - b[1]))
+                    if dist > g:
+                        continue
+                    vec_ab = np.array([b[0] - a[0], b[1] - a[1]], dtype=np.float64)
+                    if _angle_between(da, vec_ab) >= theta or _angle_between(db, -vec_ab) >= theta:
+                        continue
+                    if best is None or dist < best[0]:
+                        best = (dist, a, b)
+            if best is not None and _path_mean_prob(probs, best[1], best[2]) >= p:
+                union(i, j)
+                bridges.append((i, j, best[1], best[2]))
+
+    h, w = probs.shape
+    root_mask: dict[int, np.ndarray] = {}
+    for i in range(n):
+        r = find(i)
+        if r not in root_mask:
+            root_mask[r] = np.zeros((h, w), dtype=np.uint8)
+        root_mask[r] |= instance_masks[i]
+    for i, j, a, b in bridges:
+        r = find(i)
+        cv2.line(root_mask[r], (a[1], a[0]), (b[1], b[0]), color=1, thickness=1)
+
+    return list(root_mask.values())
