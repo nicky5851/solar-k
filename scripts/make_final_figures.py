@@ -61,7 +61,7 @@ def make_pipeline_diagram() -> None:
 
 
 def _semantic_union(masks: np.ndarray) -> np.ndarray:
-    return masks.any(axis=0) if len(masks) else np.zeros((1, 1), dtype=bool)
+    return masks.any(axis=0) if len(masks) else np.zeros(masks.shape[1:], dtype=bool)
 
 
 def make_overlay_gallery(gallery_dir: Path, images_dir: Path, captions: dict[str, str]) -> None:
