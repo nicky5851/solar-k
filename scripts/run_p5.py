@@ -74,56 +74,11 @@ def decide(bar: str, cmp_cv: dict, cmp_model: dict | None) -> dict:
 
 def write_submission(experiment: str, members: list[str], stems: list[str], day_by_stem: dict, runner_workers: int, weight_grid: list[tuple[float, ...]] | None = None) -> dict:
     """Final post-processing fit on all OOF stems, applied to the mean of every
-    member x fold test map (spec E010/E013)."""
-    import validate_submission as vs
-
-    runner = cvp.Runner(members, runner_workers)
-    try:
-        if weight_grid:
-            weights, cfg1, cfg1_pq = cvp.choose_weights_and_cfg1(runner, stems, stems, weight_grid, log)
-        else:
-            weights = None
-            stats = cvp.cfg1_stats(runner, stems, None, log)
-            cfg1, cfg1_pq = cvp.choose_cfg1(stats, stems)
-        tables = cvp.component_tables(runner, stems, cfg1, weights, log)
-        index = cvp.StatsIndex([tables[s] for s in stems])
-        rule = cvp.fit_keep_rule(index, stems)
-        kept = cvp.kept_labels_by_stem(index, rule["keep"], stems)
-        sub = cvp.day_grouped_subsample(stems, day_by_stem)
-        (t_mask, d), _, _ = cvp.choose_regrow(runner, cfg1, kept, sub, weights, log)
-    finally:
-        runner.close()
-    log(f"final fit on {len(stems)}: cfg1={cvp.cfg_key(cfg1)} gate={rule['shape_gate']} c={rule['scorer_c']} regrow=({t_mask},{d})")
-
-    ccfg = cvp.components_cfg(cfg1)
-    me, ml = rule["shape_gate"]
-    rows = []
-    test_paths = {p.stem: p for p in skio.iter_test_images()}
-    for stem in sorted(test_paths):
-        probs = skens.load_test_mean(members, stem, weights=list(weights) if weights else None)
-        processed, disk_info = skpre.load_or_build(stem, test_paths[stem])
-        features, labels = skcomp.extract_components(stem, probs, processed, disk_info, ccfg)
-        df = skcomp.to_dataframe(features)
-        if len(df):
-            keep = cvp.gate_keep(df, me, ml) & (sksc.keep_score(rule["scorer"], df) > rule["scorer_c"])
-            seeds = [(labels == f.label).astype(np.uint8) for f, k in zip(features, keep) if k]
-            grown = skpp.regrow_instances(probs, seeds, t_mask, d) if seeds else []
-            for k_i, mask in enumerate(grown):
-                if mask.sum() == 0:
-                    continue
-                rows.append({"filament_id": f"{stem}_{k_i}", "segmentation_rle": skmasks.encode_rle(mask.astype(np.uint8))})
-        del probs, processed, labels
-    out = REPO_ROOT / "outputs" / "submissions" / f"{experiment}.csv"
-    out.parent.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame(rows, columns=["filament_id", "segmentation_rle"]).to_csv(out, index=False)
-    errors = vs.validate(out, 2048, 2048, image_dir=skio.test_images_dir())
-    if errors:
-        raise SystemExit(f"{out} FAILED validate_submission.py: {errors[:5]}")
-    log(f"wrote + validated {out} ({len(rows)} instances)")
-    return {"path": str(out.relative_to(REPO_ROOT)), "n_instances": len(rows), "cfg1": cfg1.__dict__,
-            "shape_gate": rule["shape_gate"], "scorer_c": rule["scorer_c"], "regrow_t_mask": t_mask, "regrow_d": d,
-            "test_members": members, "test_folds": list(range(skens.N_MODEL_FOLDS)),
-            "member_weights": list(weights) if weights else None}
+    member x fold test map (spec E010/E013). Thin wrapper: the shared
+    implementation lives in cv_pipeline.py so scripts/build_final.py
+    (CODING_SPEC_06 E024) can call it too."""
+    del day_by_stem  # cvp.write_submission recomputes this from splits/folds_v1.csv itself
+    return cvp.write_submission(experiment, members, stems, runner_workers, weight_grid, log)
 
 
 def main() -> None:

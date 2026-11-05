@@ -47,6 +47,7 @@ from . import ensemble as skens
 from . import evaluate as skeval
 from . import ids as skids
 from . import io as skio
+from . import masks as skmasks
 from . import metric as skmetric
 from . import postprocess as skpp
 from . import preprocess as skpre
@@ -705,6 +706,73 @@ def summarise(per_fold: list[dict]) -> dict:
         "pooled_tp": tp, "pooled_fp": fp, "pooled_fn": fn,
         "loss_decomposition": loss,
     }
+
+
+# ------------------------------------------------------- final submission build
+
+def write_submission(experiment: str, members: list[str], stems: list[str], runner_workers: int, weight_grid: list[tuple[float, ...]] | None = None, log=print) -> dict:
+    """Final post-processing fit on all OOF stems (no CV split), applied to
+    the mean of every member x fold test map (CODING_SPEC_05 E010/E013;
+    CODING_SPEC_06 E024's ``scripts/build_final.py`` reuses this)."""
+    import sys
+
+    scripts_dir = skio.repo_root() / "scripts"
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+    import validate_submission as vs
+
+    runner = Runner(members, runner_workers)
+    try:
+        if weight_grid:
+            weights, cfg1, cfg1_pq = choose_weights_and_cfg1(runner, stems, stems, weight_grid, log)
+        else:
+            weights = None
+            stats = cfg1_stats(runner, stems, None, log)
+            cfg1, cfg1_pq = choose_cfg1(stats, stems)
+        tables = component_tables(runner, stems, cfg1, weights, log)
+        index = StatsIndex([tables[s] for s in stems])
+        rule = fit_keep_rule(index, stems)
+        kept = kept_labels_by_stem(index, rule["keep"], stems)
+        sub = day_grouped_subsample(stems, _day_by_stem_from_splits())
+        (t_mask, d), _, _ = choose_regrow(runner, cfg1, kept, sub, weights, log)
+    finally:
+        runner.close()
+    log(f"final fit on {len(stems)}: cfg1={cfg_key(cfg1)} gate={rule['shape_gate']} c={rule['scorer_c']} regrow=({t_mask},{d})")
+
+    ccfg = components_cfg(cfg1)
+    me, ml = rule["shape_gate"]
+    rows = []
+    test_paths = {p.stem: p for p in skio.iter_test_images()}
+    for stem in sorted(test_paths):
+        probs = skens.load_test_mean(members, stem, weights=list(weights) if weights else None)
+        processed, disk_info = skpre.load_or_build(stem, test_paths[stem])
+        features, labels = skcomp.extract_components(stem, probs, processed, disk_info, ccfg)
+        df = skcomp.to_dataframe(features)
+        if len(df):
+            keep = gate_keep(df, me, ml) & (sksc.keep_score(rule["scorer"], df) > rule["scorer_c"])
+            seeds = [(labels == f.label).astype(np.uint8) for f, k in zip(features, keep) if k]
+            grown = skpp.regrow_instances(probs, seeds, t_mask, d) if seeds else []
+            for k_i, mask in enumerate(grown):
+                if mask.sum() == 0:
+                    continue
+                rows.append({"filament_id": f"{stem}_{k_i}", "segmentation_rle": skmasks.encode_rle(mask.astype(np.uint8))})
+        del probs, processed, labels
+    out = skio.repo_root() / "outputs" / "submissions" / f"{experiment}.csv"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(rows, columns=["filament_id", "segmentation_rle"]).to_csv(out, index=False)
+    errors = vs.validate(out, 2048, 2048, image_dir=skio.test_images_dir())
+    if errors:
+        raise SystemExit(f"{out} FAILED validate_submission.py: {errors[:5]}")
+    log(f"wrote + validated {out} ({len(rows)} instances)")
+    return {"path": str(out.relative_to(skio.repo_root())), "n_instances": len(rows), "cfg1": cfg1.__dict__,
+            "shape_gate": rule["shape_gate"], "scorer_c": rule["scorer_c"], "regrow_t_mask": t_mask, "regrow_d": d,
+            "test_members": members, "test_folds": list(range(skens.N_MODEL_FOLDS)),
+            "member_weights": list(weights) if weights else None}
+
+
+def _day_by_stem_from_splits() -> dict:
+    df = pd.read_csv(skio.data_root() / "splits" / "folds_v1.csv")
+    return dict(zip(df["file_stem"], df["date"]))
 
 
 # ------------------------------------------------------- paired comparison
