@@ -21,10 +21,8 @@ FIG_DIR = REPO_ROOT / "reports" / "figures"
 
 
 def make_pipeline_diagram() -> None:
-    fig, ax = plt.subplots(figsize=(12, 4.5))
+    fig, ax = plt.subplots(figsize=(14, 5))
     ax.axis("off")
-    ax.set_xlim(0, 12)
-    ax.set_ylim(0, 4.5)
 
     boxes = [
         (0.2, "H-alpha\nimage", "#dbe9f6"),
@@ -32,7 +30,7 @@ def make_pipeline_diagram() -> None:
         (4.3, "4-flip +\n1.25x-scale\nTTA\n(inference-only)", "#cfe8d8"),
         (6.5, "member-mean\nprob map", "#dbe9f6"),
         (8.3, "cfg1 hysteresis +\nshape gate +\nscorer (c)", "#f6e3cf"),
-        (10.3, "regrow\n(watershed)", "#f6e3cf"),
+        (10.5, "regrow\n(watershed)", "#f6e3cf"),
     ]
     w, h = 1.7, 1.5
     y = 1.5
@@ -46,11 +44,14 @@ def make_pipeline_diagram() -> None:
 
     ax.text(6.5 + w / 2, y - 0.35, "fitted per CV fold on the fold's train stems (P5 protocol)",
              ha="center", fontsize=8, style="italic", color="#555")
-    ax.annotate("", xy=(11.15, y + h), xytext=(11.15, y + h + 0.6),
+    last_x = boxes[-1][0] + w / 2
+    ax.annotate("", xy=(last_x, y + h), xytext=(last_x, y + h + 0.6),
                 arrowprops=dict(arrowstyle="->", lw=1.3, color="#444"))
-    ax.text(11.15, y + h + 0.85, "instance masks\n-> PQ/SQ/RQ\n(E024 final build)",
-            ha="center", fontsize=8.5)
+    ax.text(last_x, y + h + 0.95, "instance masks\n-> PQ/SQ/RQ\n(E024 final build)",
+            ha="center", va="bottom", fontsize=8.5)
 
+    ax.set_xlim(0, last_x + 2.2)
+    ax.set_ylim(0, y + h + 2.0)
     ax.set_title("Frozen Spec 06 pipeline: E007 + E015, TTA inference, P5 post-processing refit",
                   fontsize=11)
     fig.tight_layout()

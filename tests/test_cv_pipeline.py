@@ -249,6 +249,31 @@ def test_fit_keep_rule_deterministic_across_processes(tmp_path):
     assert json.loads(outs[0])["keep"]
 
 
+def test_job_final_saves_gallery_npz_only_for_requested_stems(tmp_path, monkeypatch):
+    # CODING_SPEC_06 final deliverables: --gallery-stems must write exactly
+    # the requested stems' pred+GT masks, and must not touch GALLERY_DIR at
+    # all for stems not in GALLERY_STEMS (no accidental full-dataset dump).
+    probs = np.zeros((20, 20), dtype=np.float32)
+    probs[5, 2:10] = 0.9
+    gt = {"ann1": np.zeros((1, 20, 20), dtype=np.uint8)}
+    gt["ann1"][0, 5, 2:10] = 1
+
+    monkeypatch.setattr(cvp, "_probs", lambda stem, weights=None: probs)
+    monkeypatch.setattr(cvp, "_gt", lambda stem: gt)
+    monkeypatch.setattr(cvp, "GALLERY_STEMS", {"wanted"})
+    monkeypatch.setattr(cvp, "GALLERY_DIR", tmp_path)
+
+    cfg = skpp.PostprocessConfig()
+    args_common = (cfg.__dict__, [], 0.5, 2, None, None, None, None)
+    cvp._job_final(("skipped", *args_common))
+    assert not any(tmp_path.iterdir())
+
+    cvp._job_final(("wanted", *args_common))
+    saved = np.load(tmp_path / "wanted.npz")
+    assert "probs" in saved.files and "pred" in saved.files and "gt_ann1" in saved.files
+    np.testing.assert_array_equal(saved["gt_ann1"], gt["ann1"])
+
+
 def test_paired_bootstrap_identity_is_zero():
     rng = np.random.RandomState(0)
     df = pd.DataFrame({"stem": [f"s{i}" for i in range(50)], "cv_fold": np.arange(50) % 5,

@@ -38,7 +38,7 @@ suite) run fine on a laptop. Nothing here submits to Kaggle on your behalf.
    time from each fold's `best.pt` EMA weights — it does not require retraining:
    ```
    python3 scripts/infer.py --config configs/E007-f0.yaml --checkpoint outputs/E007-f0/best.pt \
-       --tta-views 4 --tta-scales 1.0 1.25 --out-experiment E007tta4s   # repeat per fold, per member
+       --tta-views 4 --tta-scales 1.0,1.25 --out-experiment E007tta4s-f0   # repeat per fold, per member
    ```
 
 4. **Fit post-processing and evaluate under the P5 protocol** (nested day-grouped 5-fold CV; see
