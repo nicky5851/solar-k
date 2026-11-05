@@ -100,6 +100,13 @@ def main() -> None:
     ap.add_argument("--scorer-grid", action="store_true",
                      help="CODING_SPEC_06 E019: choose current scorer vs scorer v2 (agreement features + "
                           "early-stopped HGB) on a day-grouped inner split of each CV fold's train portion.")
+    ap.add_argument("--save-details", action="store_true",
+                     help="CODING_SPEC_06 final deliverables: dump <experiment>_p5_details.csv (per-component "
+                          "tp/fp/fn with site + size-quartile) and <experiment>_p5_pixel_dice.csv (per-image "
+                          "pixel Dice/IoU with site), for the quantitative rubric breakdowns.")
+    ap.add_argument("--gallery-stems", nargs="+", default=None,
+                     help="CODING_SPEC_06 final deliverables: dump final pred+GT masks for these stems "
+                          "(whichever CV fold holds them out) to data/interim/<experiment>_gallery/<stem>.npz")
     args = ap.parse_args()
 
     weight_grid = None
@@ -125,12 +132,17 @@ def main() -> None:
     model_folds_present = sorted({fold_by_stem[s] for s in stems})
     log(f"{args.experiment}: members={args.members} images={len(stems)} model folds={model_folds_present}")
 
+    gallery_dir = str(INTERIM / f"{args.experiment}_gallery") if args.gallery_stems else None
     res = cvp.run_p5(args.members, stems, day_by_stem, site_by_stem, disk_info_by_stem, quartile_edges,
                      workers=args.workers, cv_folds=args.cv_folds, weight_grid=weight_grid,
-                     scorer_grid=args.scorer_grid, enable_merge=args.merge, log=log)
+                     scorer_grid=args.scorer_grid, enable_merge=args.merge, save_details=args.save_details,
+                     gallery_stems=set(args.gallery_stems) if args.gallery_stems else None, gallery_dir=gallery_dir, log=log)
 
     per_image_path = INTERIM / f"{args.experiment}_p5_per_image.csv"
     res.per_image.to_csv(per_image_path, index=False)
+    if args.save_details:
+        res.details.to_csv(INTERIM / f"{args.experiment}_p5_details.csv", index=False)
+        res.pixel_dice_per_image.to_csv(INTERIM / f"{args.experiment}_p5_pixel_dice.csv", index=False)
     cv_rows = [{k: v for k, v in f.items() if k not in ("loss_decomposition", "regrow_grid_pq", "merge_grid_pq", "scorer_selection")} | {"cfg1": cvp.cfg_key(skpp.PostprocessConfig.from_dict(f["cfg1"]))} for f in res.per_fold]
     pd.DataFrame(cv_rows).to_csv(INTERIM / f"{args.experiment}_p5_cv.csv", index=False)
 

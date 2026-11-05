@@ -304,12 +304,16 @@ def gate_keep(df: pd.DataFrame, min_elong: float, min_len: float) -> np.ndarray:
 _W: dict = {}
 
 
-def _worker_init(members: list[str], output_root: str | None) -> None:
+def _worker_init(members: list[str], output_root: str | None, gallery_stems: set[str] | None = None, gallery_dir: str | None = None) -> None:
     import os
 
     if output_root:
         os.environ["SOLAR_K_OUTPUT"] = output_root
     cv2.setNumThreads(1)
+    if gallery_stems:
+        global GALLERY_STEMS, GALLERY_DIR
+        GALLERY_STEMS = set(gallery_stems)
+        GALLERY_DIR = Path(gallery_dir)
     _W["members"] = members
     _W["fold_by_stem"] = skens.model_fold_by_stem()
     _W["index"] = load_annotation_index()
@@ -384,6 +388,10 @@ def _job_merge(args):
     return stem, out
 
 
+GALLERY_STEMS: set[str] = set()
+GALLERY_DIR: Path | None = None
+
+
 def _job_final(args):
     stem, cfg_dict, kept_labels, t_mask, d, merge_params, disk_info, site, weights = args
     cfg = skpp.PostprocessConfig.from_dict(cfg_dict)
@@ -396,20 +404,26 @@ def _job_final(args):
         skeval.evaluate_annotator_image(stem, a, pred, g, disk_info=disk_info, site=site, compute_pixel_metrics=True)
         for a, g in _gt(stem).items()
     ]
+    if GALLERY_DIR is not None and stem in GALLERY_STEMS:
+        gt = _gt(stem)
+        GALLERY_DIR.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(GALLERY_DIR / f"{stem}.npz", probs=probs.astype(np.float16), pred=pred,
+                             **{f"gt_{a}": g for a, g in gt.items()})
     return stem, results
 
 
 class Runner:
     """Ordered map over stems, in-process (workers=0) or in a spawn pool."""
 
-    def __init__(self, members: list[str], workers: int):
+    def __init__(self, members: list[str], workers: int, gallery_stems: set[str] | None = None, gallery_dir: str | None = None):
         self.members, self.workers = members, workers
         self.pool = None
         if workers > 0:
             ctx = mp.get_context("spawn")
-            self.pool = ctx.Pool(workers, initializer=_worker_init, initargs=(members, str(skio.output_root())))
+            self.pool = ctx.Pool(workers, initializer=_worker_init,
+                                 initargs=(members, str(skio.output_root()), gallery_stems, gallery_dir))
         else:
-            _worker_init(members, None)
+            _worker_init(members, None, gallery_stems, gallery_dir)
 
     def map(self, fn, items, log=None, label=""):
         it = self.pool.imap(fn, items, chunksize=1) if self.pool else map(fn, items)
@@ -434,6 +448,8 @@ class P5Result:
     per_fold: list[dict] = field(default_factory=list)
     per_image: pd.DataFrame | None = None
     summary: dict = field(default_factory=dict)
+    details: pd.DataFrame | None = None
+    pixel_dice_per_image: pd.DataFrame | None = None
 
 
 CACHE_TAG = ""  # set e.g. "rerun" to force a cold, separate cache (determinism checks)
@@ -609,17 +625,22 @@ def run_p5(
     weight_grid: list[tuple[float, ...]] | None = None,
     scorer_grid: bool = False,
     enable_merge: bool = False,
+    save_details: bool = False,
+    gallery_stems: set[str] | None = None,
+    gallery_dir: str | None = None,
     log=print,
 ) -> P5Result:
     stems = sorted(stems)
     fold_by_stem = skens.model_fold_by_stem()
     splits = cv_splits(stems, day_by_stem)
-    runner = Runner(members, workers)
+    runner = Runner(members, workers, gallery_stems, gallery_dir)
     try:
         stats = None if weight_grid else cfg1_stats(runner, stems, None, log)
         result = P5Result()
         image_rows = []
         fn_detail_rows = []
+        detail_dfs = []
+        dice_rows = []
         for i, (train, held) in enumerate(splits):
             if cv_folds is not None and i not in cv_folds:
                 continue
@@ -651,6 +672,14 @@ def run_p5(
             results = [r for s in held for r in final[s]]
             summ = skeval.aggregate_evaluation(results, quartile_edges=quartile_edges, noisy_stems=set())
             o = summ.overall
+            if save_details:
+                fold_details = summ.details_df.copy()
+                fold_details["cv_fold"] = i
+                detail_dfs.append(fold_details)
+                for r in results:
+                    if r.pixel_dice is not None:
+                        dice_rows.append({"stem": r.stem, "annotator": r.annotator, "site": r.site,
+                                           "cv_fold": i, "pixel_dice": r.pixel_dice, "pixel_iou": r.pixel_iou})
             fn_rows = summ.details_df[summ.details_df["kind"] == "fn"]
             for size in fn_rows["size"]:
                 fn_detail_rows.append({"cv_fold": i, "size": size})
@@ -675,6 +704,9 @@ def run_p5(
             result.per_fold.append(fold)
         result.per_image = pd.DataFrame(image_rows)
         result.summary = summarise(result.per_fold)
+        if save_details:
+            result.details = pd.concat(detail_dfs, ignore_index=True) if detail_dfs else pd.DataFrame()
+            result.pixel_dice_per_image = pd.DataFrame(dice_rows)
         if fn_detail_rows:
             fn_df = pd.DataFrame(fn_detail_rows)
             result.summary["fn_by_size_quartile"] = fn_df["size"].value_counts().to_dict()

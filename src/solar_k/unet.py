@@ -1,5 +1,7 @@
 """U-Net wrapper: build, checkpoint (with full resume state), and inference
-with optional h/v-flip TTA and tiling (CODING_SPEC_02_BASELINE.md Stage C).
+with optional flip TTA (3 or 4 views), multi-scale upscale-only TTA
+(CODING_SPEC_06_RECALL_AND_CONNECTIVITY.md E023), and tiling
+(CODING_SPEC_02_BASELINE.md Stage C).
 
 Device = CUDA > MPS > CPU, chosen here so scripts/train.py and
 scripts/predict.py don't each reimplement the fallback.
