@@ -1,0 +1,45 @@
+experiment_id: E027-f0
+description: >
+  CODING_SPEC_07_RESOLUTION_AND_SELF_TRAINING.md E027: train-time resolution
+  as the next lever (Spec 06's only working lever was TTA at higher
+  resolution; same-resolution architecture diversity between E007/E015 is
+  exhausted). Same encoder as E007 (efficientnet-b4, imagenet), but every
+  image is upsampled 1.5x before cropping (train_scale: 1.5) with a larger
+  crop (768, vs E007's 512) to keep roughly the same real-world field of
+  view per crop while giving the network native access to finer filament
+  detail. Inference matches: infer_scale 1.5 upsamples the full image the
+  same way, tiles at 1536/192 (vs E007's 1024/128, since the tiled array is
+  now 3072x3072), and downsamples the probability map back to native
+  resolution. Folds 0-1 only, gated against REF (E024, 0.4302 local PQ)
+  on model-folds 0-1 at ΔPQ >= +0.008 before committing to folds 2-4 --
+  CODING_SPEC_07's "early" gate.
+seed: 42
+fold: 0
+device: auto
+encoder_name: efficientnet-b4
+crop_size: 768
+batch_size: 6
+train_scale: 1.5
+infer_scale: 1.5
+dataset_length: null
+total_iterations: 6000
+warmup_steps: 450
+lr: 0.0003
+weight_decay: 0.0001
+checkpoint_every: 1000
+log_every: 100
+amp: true
+ema_decay: 0.999
+checkpoint_select_by: pq
+n_pq_val_images: 40
+num_workers: 4
+cache_workers: 4
+prebuild_cache: true
+save_oof_and_test_probs: true
+infer_tile_size: 1536
+infer_overlap: 192
+checkpoint_postprocess:
+  mode: threshold
+  t: 0.7
+  closing_radius: 2
+  min_area: 418
