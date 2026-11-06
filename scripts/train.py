@@ -215,12 +215,21 @@ def main() -> None:
     train_paths = {p.stem: p for p in skio.iter_train_images()}
     test_paths = {p.stem: p for p in skio.iter_test_images()}
 
+    train_scale = cfg.get("train_scale", 1.0)
     if cfg.get("prebuild_cache", True):
         stems_with_paths = [(s, train_paths[s]) for s in set(train_stems) | set(all_val_stems)]
         stems_with_paths += list(test_paths.items())
         t0 = time.time()
         n_built = skpre.build_cache(stems_with_paths, workers=cfg.get("cache_workers", 1))
         print(f"Preprocessing cache: built {n_built}/{len(stems_with_paths)} new entries in {time.time() - t0:.1f}s")
+        if train_scale != 1.0:
+            # Warm the scaled cache for the crop dataset's training stems up
+            # front, single-process-pool-serialised, so DataLoader workers
+            # never race to build-and-cache the same first-seen stem at once.
+            t0 = time.time()
+            train_stems_with_paths = [(s, train_paths[s]) for s in set(train_stems)]
+            n_built_scaled = skpre.build_cache(train_stems_with_paths, workers=cfg.get("cache_workers", 1), scale=train_scale)
+            print(f"Scaled ({train_scale}x) preprocessing cache: built {n_built_scaled}/{len(train_stems_with_paths)} new entries in {time.time() - t0:.1f}s")
 
     num_workers = cfg.get("num_workers", 0)
 
@@ -242,7 +251,7 @@ def main() -> None:
     train_ds = skds.SolarCropDataset(
         train_stems, images_by_file, anns_by_image_id,
         crop_size=cfg.get("crop_size", 512), length=cfg.get("dataset_length"), seed=cfg.get("seed", 42),
-        sampler=crop_sampler, skeleton_recall=skeleton_recall, train_scale=cfg.get("train_scale", 1.0),
+        sampler=crop_sampler, skeleton_recall=skeleton_recall, train_scale=train_scale,
     )
     loader = DataLoader(
         train_ds, batch_size=cfg.get("batch_size", 8), shuffle=True, num_workers=num_workers,

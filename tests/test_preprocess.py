@@ -162,3 +162,26 @@ def test_load_or_build_scale_cache_hit_matches_miss(tmp_path, monkeypatch):
     hit, info_hit = pp.load_or_build("stemE", raw_path, scale=1.5)
     assert np.array_equal(miss, hit)
     assert info_miss == info_hit
+
+
+
+def test_build_cache_scale_warms_separate_dir(tmp_path, monkeypatch):
+    monkeypatch.setenv("SOLAR_K_DATA", str(tmp_path))
+    img, _ = _synthetic_disk()
+    import cv2
+
+    paths = []
+    for i in range(2):
+        path = tmp_path / f"scaleimg{i}.png"
+        cv2.imwrite(str(path), img)
+        paths.append((f"scalestem{i}", path))
+
+    n_built_default = pp.build_cache(paths, workers=1)
+    assert n_built_default == 2
+    n_built_scaled = pp.build_cache(paths, workers=1, scale=1.5)
+    assert n_built_scaled == 2  # scale=1.5 cache is separate, still a miss
+    for stem, _ in paths:
+        assert pp.processed_path(stem, scale=1.5).exists()
+        assert pp.processed_path(stem, scale=1.5) != pp.processed_path(stem)
+    # re-running at scale=1.5 is now a pure cache hit
+    assert pp.build_cache(paths, workers=1, scale=1.5) == 0

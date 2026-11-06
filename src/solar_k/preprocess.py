@@ -185,18 +185,24 @@ def load_or_build(stem: str, raw_path: Path, scale: float = 1.0) -> tuple[np.nda
     return scaled_f16, scaled_info
 
 
-def _build_cache_one(args: tuple[str, Path]) -> str:
-    stem, path = args
-    load_or_build(stem, path)
+def _build_cache_one(args: tuple[str, Path, float]) -> str:
+    stem, path, scale = args
+    load_or_build(stem, path, scale=scale)
     return stem
 
 
-def build_cache(stems_with_paths: list[tuple[str, Path]], workers: int = 1) -> int:
+def build_cache(stems_with_paths: list[tuple[str, Path]], workers: int = 1, scale: float = 1.0) -> int:
     """Warm the processed-image cache for every (stem, raw_path) pair that
     isn't already cached. Multi-process by default on Kaggle's multi-core
     CPU, since this runs once up front before training (CODING_SPEC_02_BASELINE.md's
-    Kaggle path: "build the preprocessing cache at the start")."""
-    todo = [(s, p) for s, p in stems_with_paths if not (load_disk_info(s) is not None and processed_path(s).exists())]
+    Kaggle path: "build the preprocessing cache at the start").
+
+    ``scale`` (CODING_SPEC_07_RESOLUTION_AND_SELF_TRAINING.md E027): warms
+    the scale-specific cache instead of (or as well as, via a second call)
+    the default one. Doing this single-process-pool-serialised up front,
+    before the training DataLoader's workers start, avoids several worker
+    processes racing to build-and-cache the same first-seen stem at once."""
+    todo = [(s, p, scale) for s, p in stems_with_paths if not (load_disk_info(s, scale) is not None and processed_path(s, scale).exists())]
     if not todo:
         return 0
     if workers <= 1:
