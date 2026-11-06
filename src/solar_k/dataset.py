@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import random
 
+import cv2
 import numpy as np
 import torch
 from torch.utils.data import Dataset
@@ -39,9 +40,12 @@ class SolarCropDataset(Dataset):
         augment: bool = True,
         sampler: sksamp.CropCenterSampler | None = None,
         skeleton_recall: bool = False,
+        train_scale: float = 1.0,
     ):
         if not stems:
             raise ValueError("SolarCropDataset needs at least one stem")
+        if skeleton_recall and train_scale != 1.0:
+            raise NotImplementedError("skeleton_recall + train_scale != 1.0 is not supported")
         self.stems = stems
         self.images_by_file = images_by_file
         self.anns_by_image_id = anns_by_image_id
@@ -51,20 +55,31 @@ class SolarCropDataset(Dataset):
         self.rng = random.Random(seed)
         self.sampler = sampler or sksamp.CropCenterSampler()
         self.skeleton_recall = skeleton_recall
+        self.train_scale = train_scale
         self._train_paths = {p.stem: p for p in skio.iter_train_images()}
 
     def __len__(self) -> int:
         return self.length
 
     def _load_image_and_target(self, stem: str) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
-        processed, _ = skpre.load_or_build(stem, self._train_paths[stem])
+        processed, _ = skpre.load_or_build(stem, self._train_paths[stem], scale=self.train_scale)
 
         entries = self.images_by_file.get(f"{stem}.jpeg", [])
         anns_by_annotator = {}
         for e in entries:
             annotator, _ = skids.parse_image_id(e["id"])
             anns_by_annotator[annotator] = self.anns_by_image_id.get(e["id"], [])
-        target = sktgt.soft_consensus_target(anns_by_annotator, processed.shape[0], processed.shape[1])
+        if self.train_scale == 1.0:
+            target = sktgt.soft_consensus_target(anns_by_annotator, processed.shape[0], processed.shape[1])
+        else:
+            # Annotation polygon coordinates are in the image's native
+            # (scale=1.0) pixel space -- rasterise there, then upsample the
+            # resulting soft target to match the upsampled image, exactly
+            # as CODING_SPEC_07_RESOLUTION_AND_SELF_TRAINING.md E027 asks
+            # ("bilinear for the image, bilinear then the same soft target").
+            native_processed, _ = skpre.load_or_build(stem, self._train_paths[stem], scale=1.0)
+            native_target = sktgt.soft_consensus_target(anns_by_annotator, native_processed.shape[0], native_processed.shape[1])
+            target = cv2.resize(native_target, (processed.shape[1], processed.shape[0]), interpolation=cv2.INTER_LINEAR)
         skeleton = sktgt.load_or_build_skeleton(stem, target) if self.skeleton_recall else None
         return processed, target, skeleton
 

@@ -114,3 +114,51 @@ def test_load_or_build_miss_and_hit_are_bit_identical(tmp_path, monkeypatch):
     assert miss.dtype == hit.dtype == np.float32
     assert np.array_equal(miss, hit)
     assert info_miss == info_hit
+
+
+
+def test_load_or_build_scale_1_is_byte_identical_to_default(tmp_path, monkeypatch):
+    """CODING_SPEC_07_RESOLUTION_AND_SELF_TRAINING.md E027: the new ``scale``
+    kwarg must be a pure no-op at its default -- every pre-E027 call site
+    omits it, so scale=1.0 has to reproduce exactly what load_or_build
+    returned before this kwarg existed."""
+    monkeypatch.setenv("SOLAR_K_DATA", str(tmp_path))
+    img, _ = _synthetic_disk()
+    raw_path = tmp_path / "raw.png"
+    import cv2
+
+    cv2.imwrite(str(raw_path), img)
+    default, info_default = pp.load_or_build("stemC", raw_path)
+    explicit, info_explicit = pp.load_or_build("stemC", raw_path, scale=1.0)
+    assert np.array_equal(default, explicit)
+    assert info_default == info_explicit
+    # and it's cached under the same, unparameterised directory as before
+    assert pp.processed_path("stemC") == pp.processed_path("stemC", scale=1.0)
+
+
+def test_load_or_build_scale_upsamples_image_and_disk_info(tmp_path, monkeypatch):
+    monkeypatch.setenv("SOLAR_K_DATA", str(tmp_path))
+    img, _ = _synthetic_disk()
+    raw_path = tmp_path / "raw.png"
+    import cv2
+
+    cv2.imwrite(str(raw_path), img)
+    base, (cx, cy, r) = pp.load_or_build("stemD", raw_path)
+    scaled, (scx, scy, sr) = pp.load_or_build("stemD", raw_path, scale=1.5)
+    assert scaled.shape == (round(base.shape[0] * 1.5), round(base.shape[1] * 1.5))
+    assert scx == cx * 1.5 and scy == cy * 1.5 and sr == r * 1.5
+    # scaled cache lives in its own dir, separate from the scale=1.0 cache
+    assert pp.processed_path("stemD", scale=1.5) != pp.processed_path("stemD")
+
+
+def test_load_or_build_scale_cache_hit_matches_miss(tmp_path, monkeypatch):
+    monkeypatch.setenv("SOLAR_K_DATA", str(tmp_path))
+    img, _ = _synthetic_disk()
+    raw_path = tmp_path / "raw.png"
+    import cv2
+
+    cv2.imwrite(str(raw_path), img)
+    miss, info_miss = pp.load_or_build("stemE", raw_path, scale=1.5)
+    hit, info_hit = pp.load_or_build("stemE", raw_path, scale=1.5)
+    assert np.array_equal(miss, hit)
+    assert info_miss == info_hit

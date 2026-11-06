@@ -96,7 +96,7 @@ def _load_processed_and_target(stem: str, train_paths: dict, images_by_file: dic
     return processed, target
 
 
-def run_pq_validation(model, device, stems, train_paths, images_by_file, anns_by_image_id, pp_cfg, tile_size: int, overlap: int) -> float:
+def run_pq_validation(model, device, stems, train_paths, images_by_file, anns_by_image_id, pp_cfg, tile_size: int, overlap: int, infer_scale: float = 1.0) -> float:
     """CODING_SPEC_03_FP_AND_FOLDS.md E004: checkpoint selection by instance
     PQ instead of pixel Dice -- full-resolution flip-TTA inference + the
     fixed postprocess config (E002's tuned settings by default) on a small
@@ -108,7 +108,7 @@ def run_pq_validation(model, device, stems, train_paths, images_by_file, anns_by
     from solar_k import targets as sktgt
 
     model.eval()
-    prob_fn = sku.make_prob_fn(model, device, tta_flips=True, tile_size=tile_size, overlap=overlap)
+    prob_fn = sku.make_prob_fn(model, device, tta_flips=True, tile_size=tile_size, overlap=overlap, tta_scales=(infer_scale,))
     matches = []
     with torch.no_grad():
         for stem in stems:
@@ -172,12 +172,12 @@ def save_probs_png(probs: np.ndarray, path: Path) -> None:
     cv2.imwrite(str(path), arr_u8)
 
 
-def run_inference_and_save(model, device, items: list[tuple[str, Path]], out_dir: Path, tile_size: int, overlap: int, tta_views: int = 3) -> None:
+def run_inference_and_save(model, device, items: list[tuple[str, Path]], out_dir: Path, tile_size: int, overlap: int, tta_views: int = 3, infer_scale: float = 1.0) -> None:
     """``items`` is a list of (stem, raw_image_path). No postprocessing or
     tuning here by design -- that runs locally against these saved probs
     (CODING_SPEC_02_BASELINE.md's Kaggle path). ``tta_views``: see
     ``unet.make_prob_fn`` (3 = every map saved before CODING_SPEC_05)."""
-    prob_fn = sku.make_prob_fn(model, device, tta_flips=True, tile_size=tile_size, overlap=overlap, tta_views=tta_views)
+    prob_fn = sku.make_prob_fn(model, device, tta_flips=True, tile_size=tile_size, overlap=overlap, tta_views=tta_views, tta_scales=(infer_scale,))
     model.eval()
     with torch.no_grad():
         for stem, path in items:
@@ -242,7 +242,7 @@ def main() -> None:
     train_ds = skds.SolarCropDataset(
         train_stems, images_by_file, anns_by_image_id,
         crop_size=cfg.get("crop_size", 512), length=cfg.get("dataset_length"), seed=cfg.get("seed", 42),
-        sampler=crop_sampler, skeleton_recall=skeleton_recall,
+        sampler=crop_sampler, skeleton_recall=skeleton_recall, train_scale=cfg.get("train_scale", 1.0),
     )
     loader = DataLoader(
         train_ds, batch_size=cfg.get("batch_size", 8), shuffle=True, num_workers=num_workers,
@@ -350,6 +350,7 @@ def main() -> None:
                 val_metric = run_pq_validation(
                     eval_target, device, pq_val_stems, train_paths, images_by_file, anns_by_image_id,
                     pq_postprocess_cfg, cfg.get("infer_tile_size", 1024), cfg.get("infer_overlap", 128),
+                    infer_scale=cfg.get("infer_scale", 1.0),
                 )
                 metric_name = "val_pq"
             else:
@@ -384,12 +385,12 @@ def main() -> None:
 
         oof_dir = skio.output_root() / cfg["experiment_id"] / "oof"
         t0 = time.time()
-        run_inference_and_save(model, device, [(s, train_paths[s]) for s in all_val_stems], oof_dir, tile_size, overlap, cfg.get("tta_views", 3))
+        run_inference_and_save(model, device, [(s, train_paths[s]) for s in all_val_stems], oof_dir, tile_size, overlap, cfg.get("tta_views", 3), infer_scale=cfg.get("infer_scale", 1.0))
         print(f"Saved {len(all_val_stems)} OOF prob maps to {oof_dir} in {(time.time() - t0) / 60:.1f} min")
 
         test_dir = skio.output_root() / cfg["experiment_id"] / "test_probs"
         t0 = time.time()
-        run_inference_and_save(model, device, list(test_paths.items()), test_dir, tile_size, overlap, cfg.get("tta_views", 3))
+        run_inference_and_save(model, device, list(test_paths.items()), test_dir, tile_size, overlap, cfg.get("tta_views", 3), infer_scale=cfg.get("infer_scale", 1.0))
         print(f"Saved {len(test_paths)} test prob maps to {test_dir} in {(time.time() - t0) / 60:.1f} min")
 
 

@@ -98,66 +98,91 @@ def preprocess_image(img: np.ndarray) -> dict:
     }
 
 
-def processed_cache_dir() -> Path:
-    return skio.cache_root() / PREPROCESS_VERSION
+def processed_cache_dir(scale: float = 1.0) -> Path:
+    if scale == 1.0:
+        return skio.cache_root() / PREPROCESS_VERSION
+    return skio.cache_root() / f"{PREPROCESS_VERSION}_scale{scale:g}"
 
 
-def processed_path(stem: str) -> Path:
-    return processed_cache_dir() / f"{stem}.npy"
+def processed_path(stem: str, scale: float = 1.0) -> Path:
+    return processed_cache_dir(scale) / f"{stem}.npy"
 
 
-def save_processed(stem: str, arr: np.ndarray) -> Path:
-    processed_cache_dir().mkdir(parents=True, exist_ok=True)
-    path = processed_path(stem)
+def save_processed(stem: str, arr: np.ndarray, scale: float = 1.0) -> Path:
+    processed_cache_dir(scale).mkdir(parents=True, exist_ok=True)
+    path = processed_path(stem, scale)
     np.save(path, arr.astype(np.float16))
     return path
 
 
-def load_processed(stem: str) -> np.ndarray:
-    return np.load(processed_path(stem)).astype(np.float32)
+def load_processed(stem: str, scale: float = 1.0) -> np.ndarray:
+    return np.load(processed_path(stem, scale)).astype(np.float32)
 
 
-def disk_info_path(stem: str) -> Path:
-    return processed_cache_dir() / f"{stem}.disk.json"
+def disk_info_path(stem: str, scale: float = 1.0) -> Path:
+    return processed_cache_dir(scale) / f"{stem}.disk.json"
 
 
-def save_disk_info(stem: str, cx: float, cy: float, radius: float) -> Path:
+def save_disk_info(stem: str, cx: float, cy: float, radius: float, scale: float = 1.0) -> Path:
     """Cache the disk-fit params alongside the processed array, so a cache
     hit can reconstruct ``disk_mask`` from geometry instead of thresholding
     the already-normalised array (where in-disk pixels can legitimately be
     exactly 0.0 after the percentile clip, making ``processed > 0`` unsound
     as a disk-mask stand-in)."""
-    processed_cache_dir().mkdir(parents=True, exist_ok=True)
-    path = disk_info_path(stem)
+    processed_cache_dir(scale).mkdir(parents=True, exist_ok=True)
+    path = disk_info_path(stem, scale)
     path.write_text(json.dumps({"cx": cx, "cy": cy, "radius": radius}))
     return path
 
 
-def load_disk_info(stem: str) -> tuple[float, float, float] | None:
-    path = disk_info_path(stem)
+def load_disk_info(stem: str, scale: float = 1.0) -> tuple[float, float, float] | None:
+    path = disk_info_path(stem, scale)
     if not path.exists():
         return None
     d = json.loads(path.read_text())
     return d["cx"], d["cy"], d["radius"]
 
 
-def load_or_build(stem: str, raw_path: Path) -> tuple[np.ndarray, tuple[float, float, float]]:
+def load_or_build(stem: str, raw_path: Path, scale: float = 1.0) -> tuple[np.ndarray, tuple[float, float, float]]:
     """Cache-aware preprocessing: ``(processed, (cx, cy, radius))``, computing
     and caching only on a miss. The one place this logic lives, so the
     prebuild step (``build_cache``) and training/inference agree exactly on
-    what counts as "cached"."""
-    disk_info = load_disk_info(stem)
-    if disk_info is not None and processed_path(stem).exists():
-        return load_processed(stem), disk_info
-    raw = skio.load_grayscale(raw_path)
-    result = preprocess_image(raw)
-    save_processed(stem, result["processed"])
-    save_disk_info(stem, result["cx"], result["cy"], result["radius"])
-    # Return exactly what a later cache hit returns (float16-rounded, then
-    # float32), so features never depend on whether the cache was warm
-    # (CODING_SPEC_05_ENSEMBLE.md section 2.1, determinism).
-    processed = result["processed"].astype(np.float16).astype(np.float32)
-    return processed, (result["cx"], result["cy"], result["radius"])
+    what counts as "cached".
+
+    ``scale`` (CODING_SPEC_07_RESOLUTION_AND_SELF_TRAINING.md E027): >1.0
+    upsamples the *already-correct* scale-1.0 processed array (bilinear),
+    rather than re-running disk-fit/limb-correction on a resized raw image
+    -- mathematically equivalent for this pipeline (limb correction and
+    percentile normalisation commute with a uniform resize) and much
+    cheaper. Cached separately per scale so scale=1.0 call sites (every
+    pre-E027 caller) are untouched -- same cache dir, same files, same
+    return value -- and bit-for-bit reproduce their pre-E027 behaviour."""
+    if scale == 1.0:
+        disk_info = load_disk_info(stem)
+        if disk_info is not None and processed_path(stem).exists():
+            return load_processed(stem), disk_info
+        raw = skio.load_grayscale(raw_path)
+        result = preprocess_image(raw)
+        save_processed(stem, result["processed"])
+        save_disk_info(stem, result["cx"], result["cy"], result["radius"])
+        # Return exactly what a later cache hit returns (float16-rounded, then
+        # float32), so features never depend on whether the cache was warm
+        # (CODING_SPEC_05_ENSEMBLE.md section 2.1, determinism).
+        processed = result["processed"].astype(np.float16).astype(np.float32)
+        return processed, (result["cx"], result["cy"], result["radius"])
+
+    disk_info = load_disk_info(stem, scale)
+    if disk_info is not None and processed_path(stem, scale).exists():
+        return load_processed(stem, scale), disk_info
+    base_processed, (cx, cy, radius) = load_or_build(stem, raw_path, scale=1.0)
+    h, w = base_processed.shape
+    nh, nw = max(1, int(round(h * scale))), max(1, int(round(w * scale)))
+    scaled = cv2.resize(base_processed, (nw, nh), interpolation=cv2.INTER_LINEAR)
+    save_processed(stem, scaled, scale)
+    scaled_info = (cx * scale, cy * scale, radius * scale)
+    save_disk_info(stem, *scaled_info, scale=scale)
+    scaled_f16 = scaled.astype(np.float16).astype(np.float32)
+    return scaled_f16, scaled_info
 
 
 def _build_cache_one(args: tuple[str, Path]) -> str:
