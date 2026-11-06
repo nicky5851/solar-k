@@ -248,11 +248,32 @@ def main() -> None:
 
     skeleton_recall = cfg.get("skeleton_recall", False)
     skeleton_lambda = cfg.get("skeleton_lambda", 1.0)
+    pseudo_mix_cfg = cfg.get("pseudo_mix")
+    if pseudo_mix_cfg and skeleton_recall:
+        raise NotImplementedError("pseudo_mix + skeleton_recall is not supported (see dataset.MixedCropDataset)")
     train_ds = skds.SolarCropDataset(
         train_stems, images_by_file, anns_by_image_id,
         crop_size=cfg.get("crop_size", 512), length=cfg.get("dataset_length"), seed=cfg.get("seed", 42),
         sampler=crop_sampler, skeleton_recall=skeleton_recall, train_scale=train_scale,
     )
+    if pseudo_mix_cfg:
+        # CODING_SPEC_07 E028: fine-tune on a mix of labelled crops and
+        # fold-specific pseudo-labelled external crops. pseudo_dir/manifest
+        # default to this fold's own scripts/pseudo_label_external.py output
+        # -- never another fold's, which would leak that fold's models'
+        # pseudo-labels into this fold's training.
+        import csv as _csv
+
+        pseudo_dir = Path(pseudo_mix_cfg.get("pseudo_dir") or (skio.data_root() / "external" / "pseudo" / f"E028-f{cfg['fold']}"))
+        with (pseudo_dir / "_kept_stems.csv").open() as f:
+            pseudo_stems = [row["stem"] for row in _csv.DictReader(f) if row["kept"] == "True"]
+        print(f"pseudo_mix: {len(pseudo_stems)} kept external stems from {pseudo_dir}")
+        pseudo_ds = skds.ExternalPseudoCropDataset(
+            pseudo_stems, images_dir=skio.data_root() / "external" / "images", pseudo_dir=pseudo_dir,
+            crop_size=cfg.get("crop_size", 512), length=cfg.get("dataset_length"), seed=cfg.get("seed", 42),
+            sampler=crop_sampler,
+        )
+        train_ds = skds.MixedCropDataset(train_ds, pseudo_ds, real_fraction=pseudo_mix_cfg.get("real_fraction", 0.5), seed=cfg.get("seed", 42))
     loader = DataLoader(
         train_ds, batch_size=cfg.get("batch_size", 8), shuffle=True, num_workers=num_workers,
         worker_init_fn=_worker_init_fn if num_workers > 0 else None,
@@ -260,6 +281,14 @@ def main() -> None:
     )
 
     model = sku.build_model(encoder_name=cfg.get("encoder_name", "resnet34")).to(device)
+    init_weights_from = cfg.get("init_weights_from")
+    if init_weights_from:
+        # CODING_SPEC_07 E028: warm-start fine-tuning from a prior
+        # experiment's best.pt -- model weights only, fresh optimizer/
+        # scheduler/iteration count (unlike --resume, which continues the
+        # *same* experiment's own run state).
+        sku.load_checkpoint(Path(init_weights_from), model, map_location=device, restore_rng=False)
+        print(f"Initialized model weights from {init_weights_from}")
     total_iters = cfg.get("total_iterations", 6000)
     optimizer, scheduler = build_optimizer_scheduler(
         model, cfg.get("lr", 3e-4), cfg.get("weight_decay", 1e-4), cfg.get("warmup_steps", 300), total_iters
@@ -318,9 +347,14 @@ def main() -> None:
         except StopIteration:
             data_iter = iter(loader)
             batch = next(data_iter)
+        weights = None
         if skeleton_recall:
             imgs, targets, skeletons = batch
             skeletons = skeletons.to(device)
+        elif pseudo_mix_cfg:
+            imgs, targets, weights = batch
+            weights = weights.to(device)
+            skeletons = None
         else:
             imgs, targets = batch
             skeletons = None
@@ -329,7 +363,7 @@ def main() -> None:
         optimizer.zero_grad()
         with torch.amp.autocast("cuda", enabled=use_amp):
             logits = model(imgs)
-            loss = sklo.segmentation_loss(logits, targets, skeletons, skeleton_lambda)
+            loss = sklo.segmentation_loss(logits, targets, skeletons, skeleton_lambda, weight=weights)
         if use_amp:
             scaler.scale(loss).backward()
             scaler.step(optimizer)

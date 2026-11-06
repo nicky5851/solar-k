@@ -1,0 +1,45 @@
+experiment_id: E028-f0
+description: >
+  CODING_SPEC_07_RESOLUTION_AND_SELF_TRAINING.md E028, fold 0: self-training
+  on external unlabelled GONG H-alpha images. Fine-tunes from E007-f0's
+  best.pt (efficientnet-b4) for 3000 iterations on a 50/50 mix of real
+  labelled crops (SolarCropDataset, this fold's own training stems) and
+  pseudo-labelled external crops (ExternalPseudoCropDataset, pseudo-labels
+  from scripts/pseudo_label_external.py using fold 0's own E007-f0+E015-f0
+  models -- never the full ensemble, so fold 0's OOF stays leak-free).
+  Pseudo-label pixels with confidence in [0.3, 0.7] are excluded from the
+  loss via the per-pixel weight mask (losses.segmentation_loss's new
+  ``weight`` argument). Gate: model-folds 0-1 only, against REF
+  (E024_primary, local CV PQ 0.4302) restricted to those folds, early bar
+  +0.008 pooled delta -- full 5-fold run only if this passes.
+seed: 42
+fold: 0
+device: auto
+encoder_name: efficientnet-b4
+init_weights_from: outputs/E007-f0/checkpoints/best.pt
+crop_size: 512
+batch_size: 8
+dataset_length: null
+total_iterations: 3000
+warmup_steps: 225
+lr: 0.0001
+weight_decay: 0.0001
+checkpoint_every: 500
+log_every: 100
+amp: true
+ema_decay: 0.999
+checkpoint_select_by: pq
+n_pq_val_images: 40
+num_workers: 4
+cache_workers: 4
+prebuild_cache: true
+save_oof_and_test_probs: true
+infer_tile_size: 1024
+infer_overlap: 128
+pseudo_mix:
+  real_fraction: 0.5
+checkpoint_postprocess:
+  mode: threshold
+  t: 0.7
+  closing_radius: 2
+  min_area: 418

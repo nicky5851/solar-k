@@ -5,6 +5,8 @@ data/**
 !data/*/
 !data/*/.gitkeep
 !data/splits/*.csv
+!data/external/
+!data/external/gong_unlabelled_manifest.csv
 
 # Kaggle archives / raw downloads anywhere in the repo
 *.zip
