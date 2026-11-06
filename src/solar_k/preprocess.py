@@ -8,6 +8,8 @@ EDA (Otsu threshold + largest connected component).
 from __future__ import annotations
 
 import json
+import os
+import uuid
 from pathlib import Path
 
 import cv2
@@ -109,9 +111,16 @@ def processed_path(stem: str, scale: float = 1.0) -> Path:
 
 
 def save_processed(stem: str, arr: np.ndarray, scale: float = 1.0) -> Path:
+    """Writes via a same-directory temp file + ``os.replace`` (atomic within
+    a filesystem) so concurrent DataLoader workers racing to build the same
+    missing cache entry -- e.g. external pseudo-labelled stems seen for the
+    first time, CODING_SPEC_07 E028 -- never observe a partially-written
+    file."""
     processed_cache_dir(scale).mkdir(parents=True, exist_ok=True)
     path = processed_path(stem, scale)
-    np.save(path, arr.astype(np.float16))
+    tmp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp.npy")
+    np.save(tmp_path, arr.astype(np.float16))
+    os.replace(tmp_path, path)
     return path
 
 
@@ -131,7 +140,9 @@ def save_disk_info(stem: str, cx: float, cy: float, radius: float, scale: float 
     as a disk-mask stand-in)."""
     processed_cache_dir(scale).mkdir(parents=True, exist_ok=True)
     path = disk_info_path(stem, scale)
-    path.write_text(json.dumps({"cx": cx, "cy": cy, "radius": radius}))
+    tmp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    tmp_path.write_text(json.dumps({"cx": cx, "cy": cy, "radius": radius}))
+    os.replace(tmp_path, path)
     return path
 
 
