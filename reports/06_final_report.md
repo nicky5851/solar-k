@@ -119,12 +119,12 @@ wide, and downscaling destroys that) moved PQ by **+0.0082 pooled, 5/5 folds pos
 and identical members (E007+E015), differing only in whether `tta_scales` included 1.25 — the
 flip-only run isolates that the gain is specifically a resolution effect (the model sees more detail in
 thin structures at a larger effective receptive field per pixel), not from the extra flip view. This
-became the pipeline's REF, superseding E018b_E007E015 (0.4137 → 0.4302) and, with it, E013 as the
+became the pipeline's REF, superseding E018b_E007E015 (0.4217 → 0.4302) and, with it, E013 as the
 project's best local-CV result.
 
 ## 4. The frozen pipeline (E024)
 
-Members **E007 (resnet34) + E015 (efficientnet-b4)**, both evaluated with 4-flip + 1.25x-upscale TTA
+Members **E007 (efficientnet-b4) + E015 (tu-regnety_040)**, both evaluated with 4-flip + 1.25x-upscale TTA
 inference from each fold's `best.pt` EMA weights (`scripts/infer.py`, outputs renamed `E007tta4s`/
 `E015tta4s` so `src/solar_k/ensemble.py`'s existing member-resolution logic picked them up with no new
 plumbing). Post-processing: hysteresis cfg1 (`hys0.4-0.99_r3`), no shape gate, scorer cutoff c=0.325,
@@ -147,27 +147,49 @@ the facts needed to make that call and takes no further action on either CSV.
 `E024_quant_p5_details.csv`, and `E024_quant_p5_pixel_dice.csv`, produced by
 `scripts/run_p5.py --members E007tta4s E015tta4s --experiment E024_quant --save-details` on the RunPod
 pod — a rerun of the same E023_4flip_scale/E024 pipeline with per-component and per-image detail
-persisted instead of discarded.*
+persisted instead of discarded. By-site and by-area-quartile PQ below are aggregated directly from that
+run's per-image and per-component rows (pooled TP/FP/FN and summed TP IoU within each slice), not
+re-fit per slice.*
 
-**PQ / SQ / RQ:** PQ 0.4302 (CV mean), SQ ???, RQ ??? (pooled 707/707 images, loss-counted the same way
-as every other P5 run in this project).
+**PQ / SQ / RQ:** PQ 0.4302 (CV mean 0.4300 ± 0.0052), SQ 0.6813, RQ 0.6313 (pooled across all 707 OOF
+images, TP=4765, FP=2131, FN=3434).
 
-**Per-image pixel Dice:** mean ??? , median ???, p10/p90 ??? / ??? (semantic union of kept instances vs.
-semantic union of each annotator's GT, per `src/solar_k/evaluate.py:pixel_iou_dice`).
+**Per-image pixel Dice:** mean 0.6472, median 0.6794, p10/p90 0.4745 / 0.7968 (per-image mean across
+annotators, of the semantic union of kept instances vs. semantic union of each annotator's GT, per
+`src/solar_k/evaluate.py:pixel_iou_dice`; 1154 annotator-image pairs over 707 images).
 
-**Per-TP IoU:** mean ???, median ???, p10/p90 ??? / ???.
+**Per-TP IoU:** mean 0.6813, median 0.6859, p10/p90 0.5590 / 0.7914 (n=4765 matched pairs). The mean
+here equals pooled SQ by construction (SQ is the mean matched-pair IoU).
 
-**One-to-many (split, class b) / many-to-one (merge, class d):** FN/FP ??? / ??? and ??? / ???
-respectively (pooled across all 707 OOF images), vs. E013's 243/502 (b) and 210/102 (d) — the TTA
-pipeline's class-a (undetected) share fell from 68% of FN to ???%, consistent with the recall gain being
-the dominant effect (§3).
+**One-to-many (split, class b) / many-to-one (merge, class d):** FN/FP 215/445 (b) and 215/105 (d)
+(pooled across all 707 OOF images), vs. E013's 243/502 (b) and 210/102 (d) — both error classes are
+essentially flat to slightly improved, not the main story. The real shift is in class a (undetected,
+no overlapping prediction): FN fell from 2513 (68.4% of E013's 3675 total FN) to 2386 — but FN also fell
+overall (3434 total), so class a's **share** of FN is 69.5%, not lower. The recall gain is a reduction in
+the *absolute count* of missed filaments (−127 class-a FN, −241 FN overall, −6.6%), not a change in which
+error type dominates; class a remains, as in every prior spec, the large majority of what's still missed.
 
-**By GONG site:** PQ ??? (site breakdown table, pending the pod run).
+**By GONG site:** (B=Big Bear, C=Cerro Tololo, L=Learmonth, M=Mauna Loa, T=El Teide, U=Udaipur)
 
-**By GT area quartile:** PQ ??? (q1 smallest) / ??? / ??? / ??? (q4 largest) — the smallest-filament
-quartile remains the weakest slice, as in every prior spec, though the gap narrowed vs E013's ???.
+| Site | n images | PQ | SQ | RQ |
+|---|---|---|---|---|
+| U (Udaipur) | 102 | 0.4527 | 0.6852 | 0.6607 |
+| T (El Teide) | 110 | 0.4432 | 0.6807 | 0.6511 |
+| B (Big Bear) | 118 | 0.4336 | 0.6865 | 0.6316 |
+| L (Learmonth) | 127 | 0.4223 | 0.6854 | 0.6162 |
+| M (Mauna Loa) | 125 | 0.4202 | 0.6745 | 0.6230 |
+| C (Cerro Tololo) | 125 | 0.4143 | 0.6757 | 0.6131 |
 
-*(This subsection is filled in from the pod run as soon as it finishes; see the companion status note.)*
+A ~0.04 PQ spread across sites (0.4143–0.4527), driven mostly by RQ (recall/precision), not SQ — SQ is
+flat (0.674–0.687) across every site. No site is an outlier; this reads as ordinary station-to-station
+image-quality variation, not a site the pipeline fails on.
+
+**By GT area quartile:** PQ 0.3091 (q1 smallest) / 0.4373 / 0.4611 / 0.4943 (q4 largest). The smallest
+quartile remains by far the weakest slice (RQ 0.4672 vs 0.70+ in q3/q4) — a direct echo of E019's finding
+(§3) that 37% of all FN concentrate in the smallest-area quartile. A same-granularity q1-q4 PQ breakdown
+for E013 wasn't computed (E013's P5 run predates the `--save-details` flag added for this analysis), so
+the *size* of the gap-narrowing vs. E013 isn't quantified here — only the direction (recall improved
+overall, §3) is established.
 
 ### 4.2 Qualitative items
 
