@@ -25,33 +25,32 @@
 \input{preamble}
 
 % Guide styling: \guideStyletrue = show gray italic hints; \guideStylefalse = omit them
-\guideStyletrue
-% \guideStylefalse
+\guideStylefalse
 
 \begin{document}
 
-\title{\guide{Your Title Here}}  % Replace this with your title
+\title{Ensembled U-Nets with Connectivity-Aware Post-Processing and Multi-Scale TTA}
 \subtitle{A Solution to the Solar Filament Segmentation Challenge 2026} % DO NOT CHANGE
 
 
-\author{\guide{Firstname Lastname}} 
+\author{Nicky}
 \affiliation{%
-  \institution{\guide{Your Institution}}  % <- Optional (remove if you are not currently affiliated with any institute)
-  \city{\guide{City}}
-  \country{\guide{Country}}
+  \city{}
+  \country{}
 }
-\email{first.author@example.com}   % <- Replace with your own email 
-
-% \author{\guide{Second Author}}
-% \affiliation{%
-%   \institution{\guide{Your Institution}}  % <- Optional (remove if you are not currently affiliated with any institute)
-%   \city{\guide{City}}
-%   \country{\guide{Country}}
-% }
-% \email{second.author@example.com}  % <- Replace with your own email
+\email{nickyy5851@gmail.com}
 
 \begin{abstract}
-    This report describes our solution to the Solar Filament Segmentation Challenge~2026, a Kaggle competition on automatic segmentation of solar filaments in GONG H-$\alpha$ observations. \guide{Continue the abstract with the details of your work.}
+    We segment solar filaments in GONG H-$\alpha$ images with a two-member, 5-fold-CV ensemble of
+    U-Nets (EfficientNet-B4 and RegNetY-040 encoders) trained on a disk-registered,
+    limb-corrected, soft-consensus target, followed by a learned connected-component
+    post-processing pipeline (hysteresis thresholding, a shape-gated boundary-contrast scorer,
+    and skeleton-aware mask regrowth) and 4-flip + 1.25$\times$-upscale test-time augmentation. Our
+    primary submission reaches a 5-fold day-grouped cross-validation Panoptic Quality (PQ) of
+    0.4302 -- against a measured inter-annotator agreement ceiling of only 0.3399 on this dataset.
+    Ten candidate improvements were tried against pre-registered statistical decision bars over the
+    course of this project; four were adopted and six were rejected on the evidence, including a
+    second model seed and a learned post-processing scorer that both overfit their selection split.
 \end{abstract}
 
 \maketitle
@@ -62,36 +61,20 @@ Guide mode is on.}
 \par\medskip
 \fi
 
-\guide{Please limit your report to four (4) pages, excluding the Acknowledgment and References sections. Throughout this document, please follow these considerations: 
-\begin{itemize}
-    \item Do not alter any text that is currently in black color (except for the emails under authors' name).
-    \item Replace all gray text with your own.
-    \item When you are done with the report, please replace \texttt{\textbackslash guideStyletrue} with \texttt{\textbackslash guideStylefalse}, to remove any gray text. Alternatively, you can remove any text wrapped in \texttt{\textbackslash guide\{\}},
-    \item Be as succinct as possible, and only provide details regarding your own work. For example, there is no need to discuss what solar filaments are, or why filament segmentation matters.
-    \item If you must, you can add extra sections.
-\end{itemize}}
-
 
 % ==================================== %
 %              INTRODUCTION            %
 % ==================================== %
-\section{Introduction}
-    This report goes over the details of our submitted solution to the Solar Filament Segmentation Challenge~2026 \cite{filament-segmentation-2026}. The challenge, launched on July~10,~2026, is organized by the Earth-Space AI Research (ESAIR) Lab\footnote{\href{https://www.esairlab.com/home}{www.esairlab.com/}}. This challenge utilizes the MAGFiLO dataset for evaluation of the segmentation algorithms \cite{ahmadzadeh2024dataset}. \guide{Continue with your own text; you really do not need a long introduction section.}
+\section{Introduction}\label{sec:intro}
+    This report goes over the details of our submitted solution to the Solar Filament Segmentation Challenge~2026 \cite{filament-segmentation-2026}. The challenge, launched on July~10,~2026, is organized by the Earth-Space AI Research (ESAIR) Lab\footnote{\href{https://www.esairlab.com/home}{www.esairlab.com/}}. This challenge utilizes the MAGFiLO dataset for evaluation of the segmentation algorithms \cite{ahmadzadeh2024dataset}.
+
+    The single most important fact about this task, established early and confirmed independently twice (Sec.~\ref{sec:dataset}; a transparent public baseline, discussed below), is that two expert human annotators agree with each other at only PQ~$=0.3399$ on this dataset. Every number in this report should be read against that ceiling, not against 1.0. We also found, by inspecting public Kaggle notebooks for this competition, that the public leaderboard's evaluator does not penalize missing or near-empty predictions correctly: an all-empty submission scores a public 0.88, and one RLE blob of precomputed answers (no training loop, exploiting a public copy of the underlying MAGFiLO dataset) scored ``0.55+''. We therefore never optimized against the public leaderboard and treat any public score above about 0.45 as unverified; every decision in this report was made on local, day-grouped 5-fold cross-validation alone.
 
 
 % ==================================== %
 %              METHODOLOGY             %
 % ==================================== %
 \section{Methodology}\label{sec:methodology}
-    \guide{Explain your methodology, ensuring that the following items are included:
-    \begin{itemize}
-        \item (for novel algorithms) a detailed description of the algorithm introduced for segmentation,
-        \item (for existing algorithms) a quick review of the algorithm used for segmentation, and appropriate citation(s),
-        \item a detailed description of the end-to-end data pipeline, including pre-processing and post-processing,
-        \item (for ML models) a detailed description of any sampling strategy including train-val-test splits,
-        \item a graphic illustrating the entire data pipeline,
-        \item one or more graphics showing a few examples of the segmentations.
-    \end{itemize}}
 
 \subsection{Dataset}\label{sec:dataset}
     The training set has 707 grayscale JPEG images and the test set 180, all $2048\times2048$, uint8, single-channel, 702~MB on disk in total. A SHA-256 check found zero exact duplicates within the train set, within the test set, or between the two.
@@ -107,30 +90,94 @@ Guide mode is on.}
 
     For semantic-segmentation training targets, each physical image's annotators are first rasterised into per-annotator binary masks (the union of that annotator's own instances); the training target is then the per-pixel \emph{fraction} of annotators marking that pixel, so a single-annotator image yields a binary target and a multi-annotator image yields a soft target reflecting annotator (dis)agreement. Per-annotator instance masks are kept separately for evaluation rather than folded into this target.
 
+\subsection{Model}\label{sec:model}
+    We train a standard U-Net \cite{ronneberger2015unet} (via \texttt{segmentation\_models\_pytorch}) with a single input channel and a single sigmoid output channel, over two ImageNet-pretrained encoders chosen to preserve stride-2 (rather than stride-4) features from the first encoder stage -- filaments are 2--4~px wide, and a coarser first stride destroys them before the decoder can recover them. The two encoders, EfficientNet-B4 and RegNetY-040, are each trained independently with 5-fold day-grouped cross-validation (10 models total: $2~\text{encoders} \times 5~\text{folds}$), on random $512\times512$ crops with augmentation, BCE + soft Dice loss against the soft-consensus target of Sec.~\ref{sec:preprocessing}, an EMA of the weights (decay 0.999, used for all inference), and checkpoint selection by validation PQ (computed via flip-TTA inference against instance-level ground truth, not pixel Dice) every 1000 of 6000 iterations.
+
+    At inference, each encoder's 5 fold-models are applied with 4-view flip TTA (identity, horizontal, vertical, both) plus a 1.25$\times$ upscale-only augmentation (never downscale, since that destroys 2~px filaments), averaged into one probability map; the two encoders' probability maps are then averaged into a single ensemble map. A second same-architecture seed and a third (weaker) encoder were both tried as additional ensemble members and rejected (Sec.~\ref{sec:evaluation}) -- the two-member, two-encoder ensemble above is what is submitted.
+
+\subsection{Post-processing}\label{sec:postprocessing}
+    The ensemble probability map is converted to instances by (1)~hysteresis thresholding (a low and a high threshold, with a morphological closing) into a binary mask, from which connected components become candidate instances; (2)~a learned linear scorer, trained on per-component shape and boundary-contrast features (elongation, skeleton length, mean/edge probability contrast) against a day-grouped inner split, filters low-confidence components at a tuned cutoff; (3)~a watershed-based \emph{regrow} step re-expands each kept component's mask outward along the probability map up to a fixed probability floor and pixel-distance limit, recovering boundary pixels the hard threshold cut off. All four stages' hyperparameters (threshold pair, closing radius, scorer cutoff, regrow floor/distance) are chosen jointly, per cross-validation fold, by a grid search on that fold's own training images only -- never on the held-out fold -- so the reported cross-validated PQ in Sec.~\ref{sec:evaluation} is a genuine out-of-fold number. Figure~\ref{fig:pipeline} summarizes the full pipeline.
+
+    \begin{figure}[h]
+      \centering
+      \includegraphics[width=\columnwidth]{../figures/06_pipeline_diagram.png}
+      \caption{The frozen pipeline: two U-Net encoders, each 5-fold cross-validated, with flip+scale TTA at inference, averaged into one probability map, then a per-fold-refit hysteresis/scorer/regrow post-processing stack.}
+      \label{fig:pipeline}
+    \end{figure}
+
 % ==================================== %
 %              EVALUATION              %
 % ==================================== %
 \section{Evaluation}\label{sec:evaluation}
-    \guide{Explain your evaluation. This includes:
-    \begin{itemize}
-        \item the evaluation strategy,
-        \item plots and/or tables showing the performance of the segmentation algorithm (please include error bars and uncertainty measures whenever possible),
-        \item strengths and weaknesses of the proposed algorithm, and possible strategies for improvement.
-    \end{itemize}}
+    All PQ/SQ/RQ numbers below are local, 5-fold day-grouped cross-validation (CV split by observation
+    day, not by image, so all annotators of one image stay in one fold), with every post-processing
+    hyperparameter refit per fold on that fold's own training images only (Sec.~\ref{sec:postprocessing}).
+    We never selected on, or report a final decision from, the public leaderboard (Sec.~\ref{sec:intro}).
+    Every candidate change below was accepted or rejected against a pre-registered statistical bar
+    (minimum mean $\Delta$PQ, fraction of folds positive, and a bootstrap 95\% CI excluding 0 on the
+    paired per-fold difference), not by inspection.
 
     \begin{table}[h]
-      \caption{Results placeholder -- pending E002 Kaggle run.}
+      \caption{Progression of the submitted pipeline. PQ is pooled across all 707 train images'
+      out-of-fold predictions; Kaggle LB is the public leaderboard (unverified, Sec.~\ref{sec:intro}).}
       \label{tab:results}
       \begin{tabular}{lccccl}
         \toprule
-        Experiment & PQ & SQ & RQ & Kaggle LB & Notes \\
+        Model & PQ & SQ & RQ & LB & Notes \\
         \midrule
-        Inter-annotator ref. & 0.3399 & 0.6337 & 0.5364 & -- & human ceiling, from Sec.~\ref{sec:dataset} \\
-        E001 (classical) & & & & & \\
-        E002 (U-Net) & & & & & \\
+        Inter-annotator & 0.3399 & 0.6337 & 0.5364 & -- & human ceiling \\
+        E001 (classical) & 0.0346 & 0.6317 & 0.0547 & -- & dark-feature baseline \\
+        E002 (1 U-Net) & 0.2691 & -- & -- & -- & single fold, no ensemble \\
+        E004$\times$5 (1 enc.) & 0.3948 & 0.676 & 0.584 & 0.35 & 5-fold CV, no 2nd encoder \\
+        +2nd encoder & 0.4086 & 0.680 & 0.601 & 0.37 & 2-encoder ensemble (backup) \\
+        \textbf{+TTA (submitted)} & \textbf{0.4302} & \textbf{0.681} & \textbf{0.631} & \textbf{0.37} & 4-flip + 1.25$\times$ scale \\
         \bottomrule
       \end{tabular}
     \end{table}
+
+    Ten candidate changes beyond the two-encoder ensemble were tried; the decision table and full
+    per-experiment rationale are in our project's internal report. Four were adopted: a wider
+    post-processing grid search, dropping a third, weaker encoder from the ensemble (it was net-negative
+    at every weight once the grid widened), and the TTA change in Table~\ref{tab:results}'s last row.
+    Six were rejected, each on a pre-registered bar failing, including: a second same-architecture
+    model seed (passed a cheap early gate but the full ensemble-promotion bar needed mean
+    $\Delta\text{PQ}\geq0.010$ on $\geq4/5$ folds, and it only reached $+0.0023$ on 3/5); a learned
+    scorer~v2 using cross-member agreement features, which won its own inner-split selection in 4/5
+    folds but lost the held-out fold on every one ($-0.0019$ mean, 0/5 folds positive) -- a clean
+    overfitting signature; a connectivity-trained encoder with a skeleton-recall loss term, which failed
+    its own cheap gate before the full 5-fold training cost was paid; and a fragment-merging
+    post-process step that fixed the error type it targeted (one-to-many/split errors fell) but
+    increased many-to-one/merge errors, violating an explicit project constraint. One experiment --
+    adding a 1.25$\times$ upscale pass to an already-present flip-only TTA -- was run as a controlled
+    pair specifically to isolate which half of the change was doing the work: 4~flip views alone changed
+    PQ by $-0.0009$ (noise); adding the scale moved it by $+0.0082$ pooled across all 5 folds (CI
+    $[0.0042, 0.0127]$), the single largest and cleanest-signed gain in the project.
+
+    \textbf{Error decomposition.} 69\% of all false negatives in the submitted pipeline have no
+    overlapping prediction at all (undetected filaments), concentrated in the smallest quartile of
+    ground-truth instance area (PQ 0.31 in that quartile vs.\ 0.49 in the largest). One-to-many
+    (fragmentation) and many-to-one (merging) instance-identity errors are a comparatively small share
+    (660 and 320 FN+FP pairs respectively, vs.\ 3349 undetected-filament FN+FP) and were essentially unmoved by the
+    TTA change -- the gain is a genuine recall improvement on faint/small filaments, not a reshuffling of
+    which error type dominates. Figure~\ref{fig:gallery} shows this directly: a typical image, the
+    worst fragmentation case, the worst merge case, and a faint filament recovered by TTA that the
+    backup ensemble missed entirely.
+
+    \begin{figure}[h]
+      \centering
+      \includegraphics[width=\columnwidth]{../figures/06_overlay_gallery.png}
+      \caption{H-alpha overlay gallery, out-of-fold predictions only. Green: prediction and ground truth
+      agree; blue: ground truth missed; red: prediction with no ground-truth counterpart.}
+      \label{fig:gallery}
+    \end{figure}
+
+    \textbf{Weaknesses and future work.} The smallest-filament recall gap (PQ 0.31 in the smallest GT-area
+    quartile) is the largest remaining lever and was only partly addressed this cycle; a scorer that
+    actually generalizes past the inner-split overfitting we observed, or a loss term that more directly
+    rewards small/faint-instance recall during training (rather than only at TTA/post-processing time),
+    are the most promising untried directions. We also have not re-verified, at the end of this project,
+    that our evaluation protocol is itself fully deterministic run-to-run at every new configuration --
+    we rely on an earlier spec's one-time check of this rather than re-running it per experiment.
 
 % ==================================== %
 %            ACKNOWLEDGMENT            %
