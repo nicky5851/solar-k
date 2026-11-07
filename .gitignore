@@ -88,6 +88,10 @@ docs/
 !reports/*.md
 !reports/figures/**
 
+# ---- weights/ is otherwise gitignored (never commit checkpoints), but this
+# audit doc is documentation, not a checkpoint ----
+!weights/CHECKPOINT_AUDIT.md
+
 # ---- Paper (Overleaf template, tracked) ----
 !reports/paper/**
 reports/paper/**/*.aux

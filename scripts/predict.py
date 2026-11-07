@@ -18,9 +18,12 @@ spec requires inference in fp32 even though the saved weights are fp16),
 runs fresh inference over the test images, and averages member-outer
 fold-inner (matching ``solar_k.ensemble.load_test_mean``'s summation order)
 to reproduce the same probability maps the original pipeline built from
-precomputed PNGs -- modulo the PNG's own 8-bit quantization, which is why
-the spec's own acceptance bar is "CSV matches exactly, or mean per-instance
-IoU >= 0.99", not necessarily byte-identical.
+precomputed PNGs. Each per-member, per-fold map is round-tripped through
+the same 8-bit quantization ``train.py:save_probs_png`` applied before the
+original pipeline ever averaged it (clip to [0,255], floor to uint8, divide
+back by 255) -- this is what makes the two pipelines agree, not just
+approximately but on which borderline components clear the scorer cutoff,
+since that quantization step runs *before* ensembling in both paths.
 
 Usage:
   python scripts/predict.py --images data/raw/test/test_images \
@@ -112,6 +115,12 @@ def predict_test_means(members: list[str], weights_dir: Path, device_str: str, m
                     processed, disk_info = skpre.load_or_build(stem, test_paths[stem])
                     disk_mask, _ = skpre.disk_mask_and_r(processed.shape, *disk_info)
                     probs = prob_fn(processed, disk_mask)
+                    # Match the original pipeline bit-for-bit: every per-member,
+                    # per-fold map was persisted as an 8-bit PNG (train.py's
+                    # save_probs_png) before ensemble.load_test_mean averaged
+                    # them, so each map here must go through the same
+                    # round-trip quantization before accumulating.
+                    probs = (np.clip(probs * 255.0, 0, 255).astype(np.uint8)).astype(np.float32) / 255.0
                     if stem not in running:
                         running[stem] = np.zeros_like(probs, dtype=np.float64)
                     running[stem] += probs.astype(np.float64) * w

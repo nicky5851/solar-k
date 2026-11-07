@@ -47,7 +47,8 @@
     post-processing pipeline (hysteresis thresholding, a shape-gated boundary-contrast scorer,
     and skeleton-aware mask regrowth) and 4-flip + 1.25$\times$-upscale test-time augmentation. Our
     primary submission reaches a 5-fold day-grouped cross-validation Panoptic Quality (PQ) of
-    0.4302 -- against a measured inter-annotator agreement ceiling of only 0.3399 on this dataset.
+    0.4297 $\pm$ 0.0048 (0.4298 pooled) -- against a measured inter-annotator agreement ceiling of
+    only 0.3399 on this dataset.
     Ten candidate improvements were tried against pre-registered statistical decision bars over the
     course of this project; four were adopted and six were rejected on the evidence, including a
     second model seed and a learned post-processing scorer that both overfit their selection split.
@@ -112,6 +113,12 @@ Guide mode is on.}
     All PQ/SQ/RQ numbers below are local, 5-fold day-grouped cross-validation (CV split by observation
     day, not by image, so all annotators of one image stay in one fold), with every post-processing
     hyperparameter refit per fold on that fold's own training images only (Sec.~\ref{sec:postprocessing}).
+    Two of the ten fold-checkpoints (one 5-fold encoder's folds 3 and 4) were lost after the original
+    scoring run and retrained from scratch on the original configs and seed; a dedicated check found
+    the retrained checkpoint reproduces the original pipeline's probability maps bit-for-bit, and the
+    full rebuilt pipeline's 5-fold PQ differs from the originally-scored run by $-0.0004$ pooled (max
+    $0.0038$ on any single fold), well inside this project's own $\pm0.005$ reproducibility bar --
+    the numbers below are from this verified-reproducible rebuild.
     We never selected on, or report a final decision from, the public leaderboard (Sec.~\ref{sec:intro}).
     Every candidate change below was accepted or rejected against a pre-registered statistical bar
     (minimum mean $\Delta$PQ, fraction of folds positive, and a bootstrap 95\% CI excluding 0 on the
@@ -130,7 +137,7 @@ Guide mode is on.}
         E002 (1 U-Net) & 0.2691 & -- & -- & -- & single fold, no ensemble \\
         E004$\times$5 (1 enc.) & 0.3948 & 0.676 & 0.584 & 0.35 & 5-fold CV, no 2nd encoder \\
         +2nd encoder & 0.4086 & 0.680 & 0.601 & 0.37 & 2-encoder ensemble (backup) \\
-        \textbf{+TTA (submitted)} & \textbf{0.4302} & \textbf{0.681} & \textbf{0.631} & \textbf{0.37} & 4-flip + 1.25$\times$ scale \\
+        \textbf{+TTA (submitted)} & \textbf{0.4298} & \textbf{0.681} & \textbf{0.631} & \textbf{0.37} & 4-flip + 1.25$\times$ scale \\
         \bottomrule
       \end{tabular}
     \end{table}
