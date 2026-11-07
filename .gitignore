@@ -73,7 +73,16 @@ venv/
 *.md
 !README.md
 !**/README.md
+!CLAUDE.md
 docs/
+# CODING_SPEC_08 repo tidy: specs, CLAUDE.md and the decision log are real
+# project documentation and belong in the repo; docs/HANDOFF.md (running
+# notes, Mac-local) and docs/RESEARCH_PLAN.md stay out -- no negation below
+# covers them, so the blanket *.md/docs/ rules above still apply to them.
+!docs/
+!docs/specs/
+!docs/specs/*.md
+!docs/Notes.md
 
 # ---- Spec reports and their figures (tracked, unlike other planning docs) ----
 !reports/*.md
