@@ -29,11 +29,15 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import scipy.sparse as sp
 from sklearn.model_selection import GroupKFold
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import validate_submission as vs
+from run_e002_eval import build_gt_for_stem, load_annotation_index, load_prob_png
+from run_e003 import ComponentCache, build_component_cache, summary_row
+from run_e005 import _gt_to_dense, _gt_to_sparse, load_available_fold_dirs
 
 from solar_k import components as skcomp
 from solar_k import evaluate as skeval
@@ -42,11 +46,6 @@ from solar_k import masks as skmasks
 from solar_k import postprocess as skpp
 from solar_k import preprocess as skpre
 from solar_k import scorer as sksc
-
-import validate_submission as vs
-from run_e002_eval import build_gt_for_stem, load_annotation_index, load_prob_png
-from run_e003 import ComponentCache, build_component_cache, summary_row
-from run_e005 import _gt_to_dense, _gt_to_sparse, load_available_fold_dirs
 
 REPO_ROOT = skio.repo_root()
 H = W = 2048

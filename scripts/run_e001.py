@@ -28,6 +28,8 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import validate_submission as vs
+
 from solar_k import classical as skcl
 from solar_k import evaluate as skeval
 from solar_k import ids as skids
@@ -37,8 +39,6 @@ from solar_k import predict as skpred
 from solar_k import preprocess as skpre
 from solar_k import targets as sktgt
 from solar_k import tuning as sktune
-
-import validate_submission as vs
 
 H = W = 2048
 REPO_ROOT = skio.repo_root()

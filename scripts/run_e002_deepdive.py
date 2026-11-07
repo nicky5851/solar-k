@@ -44,14 +44,18 @@ from skimage.morphology import skeletonize
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from solar_k import evaluate as skeval
+from run_e002_eval import (
+    build_gt_for_stem,
+    fold0_val_stems,
+    load_annotation_index,
+    load_prob_png,
+)
+
 from solar_k import io as skio
 from solar_k import metric as skmetric
 from solar_k import postprocess as skpp
 from solar_k import preprocess as skpre
 from solar_k import tuning as sktune
-
-from run_e002_eval import build_gt_for_stem, fold0_val_stems, load_annotation_index, load_prob_png
 
 H = W = 2048
 REPO_ROOT = skio.repo_root()

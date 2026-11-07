@@ -53,6 +53,8 @@ from scipy.ndimage import distance_transform_edt
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from run_e002_eval import build_gt_for_stem, load_annotation_index, load_prob_png
+
 from solar_k import components as skcomp
 from solar_k import evaluate as skeval
 from solar_k import ids as skids
@@ -63,8 +65,6 @@ from solar_k import preprocess as skpre
 from solar_k import scorer as sksc
 from solar_k import targets as sktgt
 from solar_k import tuning as sktune
-
-from run_e002_eval import build_gt_for_stem, load_annotation_index, load_prob_png
 
 H = W = 2048
 REPO_ROOT = skio.repo_root()
@@ -79,7 +79,7 @@ def sq_ceiling(images_by_file, anns_by_image_id) -> dict:
     consistency."""
     matches = []
     n_images = 0
-    for file_name, entries in images_by_file.items():
+    for entries in images_by_file.values():
         if len(entries) < 2:
             continue
         n_images += 1
@@ -88,8 +88,8 @@ def sq_ceiling(images_by_file, anns_by_image_id) -> dict:
             annotator, _ = skids.parse_image_id(e["id"])
             anns_by_annotator[annotator] = anns_by_image_id.get(e["id"], [])
 
-        for a in anns_by_annotator:
-            own_masks = sktgt.annotator_instance_masks(anns_by_annotator[a], H, W)
+        for a, own_anns in anns_by_annotator.items():
+            own_masks = sktgt.annotator_instance_masks(own_anns, H, W)
             own = np.stack(own_masks) if own_masks else np.zeros((0, H, W), dtype=np.uint8)
 
             others = {k: v for k, v in anns_by_annotator.items() if k != a}
@@ -181,8 +181,8 @@ def main() -> None:
     print(f"Folds available locally: {available_folds} ({len(oof_path_by_stem)} images total)", flush=True)
 
     tune_stems, report_stems = sktune.split_tune_report(day_by_stem, seed=0)
-    tune_stems = set(s for s in tune_stems if s in oof_path_by_stem)
-    report_stems = set(s for s in report_stems if s in oof_path_by_stem)
+    tune_stems = {s for s in tune_stems if s in oof_path_by_stem}
+    report_stems = {s for s in report_stems if s in oof_path_by_stem}
     all_stems = sorted(tune_stems | report_stems)
     print(f"Tune: {len(tune_stems)} images, Report: {len(report_stems)} images", flush=True)
 

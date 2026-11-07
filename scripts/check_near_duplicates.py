@@ -78,7 +78,7 @@ def find_candidate_pairs(rows: list[dict]) -> list[tuple[dict, dict, float]]:
     for r in rows:
         by_site[r["site"]].append(r)
     pairs = []
-    for site, items in by_site.items():
+    for items in by_site.values():
         items = sorted(items, key=lambda r: r["ts"])
         n = len(items)
         for i in range(n):
@@ -120,7 +120,7 @@ def pick_threshold(background: np.ndarray, candidate: np.ndarray) -> float:
 
 def main() -> None:
     rows = gather_images()
-    by_stem = {r["stem"]: r for r in rows}
+    {r["stem"]: r for r in rows}
 
     candidate_pairs = find_candidate_pairs(rows)
     print(f"Candidate pairs (same site, <{MAX_DT_MINUTES} min apart): {len(candidate_pairs)}")
@@ -210,9 +210,9 @@ def main() -> None:
             "max": float(candidate_corrs.max()) if len(candidate_corrs) else None,
         },
         "threshold": threshold,
-        "n_flagged": int(len(flagged)),
-        "n_flagged_train_train": int(len(train_train_flagged)),
-        "n_flagged_train_test": int(len(train_test_flagged)),
+        "n_flagged": len(flagged),
+        "n_flagged_train_train": len(train_train_flagged),
+        "n_flagged_train_test": len(train_test_flagged),
         "fold_violations": fold_violations,
     }
     summary_path = skio.data_root() / "interim" / "near_duplicates_v2_summary.json"

@@ -26,16 +26,20 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from solar_k import components as skcomp
+from run_e002_eval import (
+    build_gt_for_stem,
+    fold0_val_stems,
+    load_annotation_index,
+    load_prob_png,
+)
+from run_e003 import build_component_cache
+
 from solar_k import evaluate as skeval
 from solar_k import io as skio
 from solar_k import postprocess as skpp
 from solar_k import preprocess as skpre
 from solar_k import scorer as sksc
 from solar_k import tuning as sktune
-
-from run_e002_eval import build_gt_for_stem, fold0_val_stems, load_annotation_index, load_prob_png
-from run_e003 import build_component_cache
 
 REPO_ROOT = skio.repo_root()
 OOF_DIR = skio.output_root() / "E002" / "oof"

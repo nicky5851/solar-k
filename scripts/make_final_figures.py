@@ -10,6 +10,7 @@ not committed to the repo.
 from __future__ import annotations
 
 import argparse
+import itertools
 from pathlib import Path
 
 import matplotlib.patches as mpatches
@@ -38,15 +39,15 @@ def make_pipeline_diagram() -> None:
         ax.add_patch(mpatches.FancyBboxPatch((x, y), w, h, boxstyle="round,pad=0.05",
                                               fc=color, ec="#444", lw=1.2))
         ax.text(x + w / 2, y + h / 2, label, ha="center", va="center", fontsize=9)
-    for (x0, _, _), (x1, _, _) in zip(boxes[:-1], boxes[1:]):
+    for (x0, _, _), (x1, _, _) in itertools.pairwise(boxes):
         ax.annotate("", xy=(x1, y + h / 2), xytext=(x0 + w, y + h / 2),
-                     arrowprops=dict(arrowstyle="->", lw=1.3, color="#444"))
+                     arrowprops={"arrowstyle": "->", "lw": 1.3, "color": "#444"})
 
     ax.text(6.5 + w / 2, y - 0.35, "fitted per CV fold on the fold's train stems (P5 protocol)",
              ha="center", fontsize=8, style="italic", color="#555")
     last_x = boxes[-1][0] + w / 2
     ax.annotate("", xy=(last_x, y + h), xytext=(last_x, y + h + 0.6),
-                arrowprops=dict(arrowstyle="->", lw=1.3, color="#444"))
+                arrowprops={"arrowstyle": "->", "lw": 1.3, "color": "#444"})
     ax.text(last_x, y + h + 0.95, "instance masks\n-> PQ/SQ/RQ\n(E024 final build)",
             ha="center", va="bottom", fontsize=8.5)
 

@@ -23,16 +23,16 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from run_e002_eval import build_gt_for_stem, load_annotation_index, load_prob_png
+from run_e003 import build_component_cache
+from run_e009 import regrow_pred
+
 from solar_k import cv_pipeline as cvp
 from solar_k import io as skio
 from solar_k import metric as skmetric
 from solar_k import postprocess as skpp
 from solar_k import preprocess as skpre
 from solar_k import scorer as sksc
-
-from run_e002_eval import build_gt_for_stem, load_annotation_index, load_prob_png
-from run_e003 import build_component_cache
-from run_e009 import regrow_pred
 
 INTERIM = skio.repo_root() / "data" / "interim"
 

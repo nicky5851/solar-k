@@ -10,7 +10,6 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional
 
 STEM_RE = re.compile(r"^(?P<prefix>\d+_)?(?P<ts>\d{14})(?P<site>[A-Za-z])h$")
 
@@ -18,12 +17,12 @@ STEM_RE = re.compile(r"^(?P<prefix>\d+_)?(?P<ts>\d{14})(?P<site>[A-Za-z])h$")
 @dataclass(frozen=True)
 class ParsedStem:
     raw: str
-    prefix: Optional[str]
+    prefix: str | None
     timestamp: datetime
     site: str
 
 
-def parse_stem(stem: str) -> Optional[ParsedStem]:
+def parse_stem(stem: str) -> ParsedStem | None:
     """Parse a filename stem. Returns ``None`` (never raises) if it doesn't match."""
     m = STEM_RE.match(stem)
     if m is None:

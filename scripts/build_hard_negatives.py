@@ -36,14 +36,14 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from run_e002_eval import build_gt_for_stem, load_annotation_index, load_prob_png
+
 from solar_k import components as skcomp
 from solar_k import io as skio
 from solar_k import metric as skmetric
 from solar_k import postprocess as skpp
 from solar_k import preprocess as skpre
 from solar_k import scorer as sksc
-
-from run_e002_eval import build_gt_for_stem, load_annotation_index, load_prob_png
 
 H = W = 2048
 REPO_ROOT = skio.repo_root()
@@ -177,8 +177,8 @@ def main() -> None:
                     "stem": stem, "fold": fold,
                     "bbox_y0": int(ys.min()), "bbox_x0": int(xs.min()),
                     "bbox_y1": int(ys.max()), "bbox_x1": int(xs.max()),
-                    "centroid_y": int(round(ys.mean())), "centroid_x": int(round(xs.mean())),
-                    "area": int(len(cols)), "class": classes[i], "p_match": round(pm, 4),
+                    "centroid_y": round(ys.mean()), "centroid_x": round(xs.mean()),
+                    "area": len(cols), "class": classes[i], "p_match": round(pm, 4),
                     "single_annotator": single_annotator,
                 })
             n_processed += 1

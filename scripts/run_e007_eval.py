@@ -37,16 +37,20 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from solar_k import components as skcomp
+from run_e002_eval import build_gt_for_stem, load_annotation_index, load_prob_png
+from run_e003 import (
+    ComponentCache,
+    build_component_cache,
+    evaluate_filtered,
+    summary_row,
+)
+
 from solar_k import evaluate as skeval
 from solar_k import io as skio
 from solar_k import postprocess as skpp
 from solar_k import preprocess as skpre
 from solar_k import scorer as sksc
 from solar_k import tuning as sktune
-
-from run_e002_eval import build_gt_for_stem, load_annotation_index, load_prob_png
-from run_e003 import ComponentCache, build_component_cache, evaluate_filtered, summary_row
 
 REPO_ROOT = skio.repo_root()
 C_GRID = [round(x, 3) for x in np.arange(0.0, 0.525, 0.025)]
@@ -180,7 +184,7 @@ def main() -> None:
         all_stems = tune_stems + report_stems
 
         candidate_dir = skio.output_root() / f"{args.experiment}-f{fold}" / "oof"
-        baseline_dir = skio.output_root() / "E004-f{}".format(fold) / "oof"
+        baseline_dir = skio.output_root() / f"E004-f{fold}" / "oof"
         if not candidate_dir.exists():
             print(f"fold {fold}: {candidate_dir} missing, skipping")
             continue

@@ -15,7 +15,7 @@ from solar_k import unet as sku
 
 @pytest.fixture
 def fake_outputs(tmp_path, monkeypatch):
-    rng = np.random.RandomState(0)
+    np.random.RandomState(0)
     stems = [f"s{i:02d}" for i in range(20)]
     folds = pd.DataFrame({"file_stem": stems, "fold": [i % 5 for i in range(20)]})
     (tmp_path / "data" / "splits").mkdir(parents=True)

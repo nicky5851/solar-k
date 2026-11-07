@@ -22,7 +22,7 @@ from pathlib import Path
 import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from solar_k import io as skio  # noqa: E402
+from solar_k import io as skio
 
 CHECKPOINTS = (
     [("E007", k, "efficientnet-b4", f"configs/E007-f{k}.yaml") for k in range(5)]

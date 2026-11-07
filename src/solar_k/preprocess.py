@@ -23,7 +23,7 @@ PREPROCESS_VERSION = "v1"
 def fit_disk(img: np.ndarray) -> tuple[float, float, float]:
     """Otsu threshold + largest connected component -> (cx, cy, radius)."""
     _, mask = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    n, labels, stats, centroids = cv2.connectedComponentsWithStats(
+    n, _labels, stats, centroids = cv2.connectedComponentsWithStats(
         (mask > 0).astype(np.uint8), connectivity=8
     )
     h, w = img.shape
@@ -187,7 +187,7 @@ def load_or_build(stem: str, raw_path: Path, scale: float = 1.0) -> tuple[np.nda
         return load_processed(stem, scale), disk_info
     base_processed, (cx, cy, radius) = load_or_build(stem, raw_path, scale=1.0)
     h, w = base_processed.shape
-    nh, nw = max(1, int(round(h * scale))), max(1, int(round(w * scale)))
+    nh, nw = max(1, round(h * scale)), max(1, round(w * scale))
     scaled = cv2.resize(base_processed, (nw, nh), interpolation=cv2.INTER_LINEAR)
     save_processed(stem, scaled, scale)
     scaled_info = (cx * scale, cy * scale, radius * scale)

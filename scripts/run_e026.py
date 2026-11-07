@@ -16,8 +16,7 @@ from __future__ import annotations
 import json
 import sys
 import time
-from datetime import datetime, timezone
-from pathlib import Path
+from datetime import UTC, datetime
 
 import pandas as pd
 
@@ -38,7 +37,7 @@ BAR = {"min_mean_delta": 0.005, "min_folds_positive": 4, "sq_tolerance": 0.005, 
 
 
 def log(msg: str) -> None:
-    print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] {msg}", flush=True)
+    print(f"[{datetime.now(UTC).strftime('%H:%M:%S')}] {msg}", flush=True)
 
 
 def rebuild_cfg1_grid(min_area: int) -> list:

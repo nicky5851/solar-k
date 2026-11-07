@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator
 
 import numpy as np
 from PIL import Image
@@ -73,8 +73,7 @@ def iter_image_paths(directory: Path) -> Iterator[Path]:
         for p in directory.iterdir()
         if p.suffix.lower() in IMAGE_SUFFIXES and not p.name.startswith(".")
     ]
-    for p in sorted(paths, key=lambda p: p.stem):
-        yield p
+    yield from sorted(paths, key=lambda p: p.stem)
 
 
 def iter_train_images() -> Iterator[Path]:

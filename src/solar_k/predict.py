@@ -8,8 +8,8 @@ RLE/CSV writing -- is shared.
 from __future__ import annotations
 
 import time
+from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import Callable, Iterable
 
 import numpy as np
 import pandas as pd

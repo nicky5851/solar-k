@@ -34,7 +34,7 @@ class PostprocessConfig:
     max_instances: int = 2000
 
     @classmethod
-    def from_dict(cls, d: dict) -> "PostprocessConfig":
+    def from_dict(cls, d: dict) -> PostprocessConfig:
         return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})
 
 
@@ -196,7 +196,7 @@ def _angle_between(u: np.ndarray, v: np.ndarray) -> float:
 
 
 def _path_mean_prob(probs: np.ndarray, a: tuple[int, int], b: tuple[int, int]) -> float:
-    n = max(int(round(float(np.hypot(b[0] - a[0], b[1] - a[1])))), 1)
+    n = max(round(float(np.hypot(b[0] - a[0], b[1] - a[1]))), 1)
     ys = np.clip(np.linspace(a[0], b[0], n + 1).round().astype(int), 0, probs.shape[0] - 1)
     xs = np.clip(np.linspace(a[1], b[1], n + 1).round().astype(int), 0, probs.shape[1] - 1)
     return float(probs[ys, xs].mean())

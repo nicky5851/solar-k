@@ -30,7 +30,7 @@ def validate(csv_path: Path, height: int = 2048, width: int = 2048, image_dir: P
 
     try:
         df = pd.read_csv(csv_path, dtype=str)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 -- user-facing validator must not crash on any malformed input
         return [f"could not read CSV: {e}"]
 
     if list(df.columns) != REQUIRED_COLUMNS:
@@ -60,7 +60,7 @@ def validate(csv_path: Path, height: int = 2048, width: int = 2048, image_dir: P
         for counts in group["segmentation_rle"]:
             try:
                 mask = skmasks.decode_rle(str(counts), height, width)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 -- user-facing validator must not crash on any malformed input
                 errors.append(f"filament_id for image {stem}: RLE failed to decode ({e})")
                 continue
             if mask.shape != (height, width):

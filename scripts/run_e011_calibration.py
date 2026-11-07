@@ -67,7 +67,7 @@ def main() -> None:
             r = ks_2samp(a, b)
             ks[single + "_vs_mean"][f] = {"ks": round(float(r.statistic), 4), "p": float(r.pvalue),
                                            "median_single": round(float(a.median()), 4), "median_mean": round(float(b.median()), 4)}
-    n_comp = {k: int(len(v)) for k, v in feats.items()}
+    n_comp = {k: len(v) for k, v in feats.items()}
 
     gate = {}
     for k, s in summaries.items():

@@ -11,3 +11,4 @@ torch==2.15.0
 segmentation-models-pytorch==0.6.0
 scikit-learn==1.9.1
 requests==2.32.5
+timm==1.0.30

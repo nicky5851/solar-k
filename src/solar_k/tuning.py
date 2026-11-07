@@ -23,7 +23,7 @@ R_GRID = [0, 1, 2, 3]
 
 
 def min_area_grid(eda_p1_area: float) -> list[int]:
-    return sorted({max(1, int(round(eda_p1_area * m))) for m in (0.5, 1.0, 2.0)})
+    return sorted({max(1, round(eda_p1_area * m)) for m in (0.5, 1.0, 2.0)})
 
 
 def full_grid(eda_p1_area: float) -> list[skpp.PostprocessConfig]:

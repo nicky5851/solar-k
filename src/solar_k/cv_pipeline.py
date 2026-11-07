@@ -660,12 +660,12 @@ def run_p5(
             rule = fit_keep_rule(index, train, scorer_version=scorer_version)
             kept = kept_labels_by_stem(index, rule["keep"], stems)
             sub = day_grouped_subsample(train, day_by_stem)
-            (t_mask, d), regrow_pq, regrow_pqs = choose_regrow(runner, cfg1, kept, sub, w, log)
+            (t_mask, d), _regrow_pq, regrow_pqs = choose_regrow(runner, cfg1, kept, sub, w, log)
             if enable_merge:
-                (g, theta, p), merge_pq, merge_pqs = choose_merge(runner, cfg1, kept, t_mask, d, sub, w, log)
+                (g, theta, p), _merge_pq, merge_pqs = choose_merge(runner, cfg1, kept, t_mask, d, sub, w, log)
                 merge_params = (g, theta, p)
             else:
-                g, theta, p, merge_pq, merge_pqs = None, None, None, None, None
+                g, theta, p, _merge_pq, merge_pqs = None, None, None, None, None
                 merge_params = None
             log(f"  gate={rule['shape_gate']} c={rule['scorer_c']} regrow=({t_mask},{d}) merge={merge_params} weights={weight_tag(w)} on {len(sub)} imgs")
             final = runner.map(_job_final, [(s, cfg1.__dict__, kept[s], t_mask, d, merge_params, disk_info_by_stem[s], site_by_stem[s], w) for s in held], log, "held-out")
@@ -796,11 +796,11 @@ def write_submission(experiment: str, members: list[str], stems: list[str], runn
     runner = Runner(members, runner_workers)
     try:
         if weight_grid:
-            weights, cfg1, cfg1_pq = choose_weights_and_cfg1(runner, stems, stems, weight_grid, log)
+            weights, cfg1, _cfg1_pq = choose_weights_and_cfg1(runner, stems, stems, weight_grid, log)
         else:
             weights = None
             stats = cfg1_stats(runner, stems, None, log)
-            cfg1, cfg1_pq = choose_cfg1(stats, stems)
+            cfg1, _cfg1_pq = choose_cfg1(stats, stems)
         tables = component_tables(runner, stems, cfg1, weights, log)
         index = StatsIndex([tables[s] for s in stems])
         rule = fit_keep_rule(index, stems)

@@ -34,6 +34,14 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import validate_submission as vs
+from run_e002_eval import (
+    build_gt_for_stem,
+    fold0_val_stems,
+    load_annotation_index,
+    load_prob_png,
+)
+
 from solar_k import components as skcomp
 from solar_k import evaluate as skeval
 from solar_k import io as skio
@@ -42,9 +50,6 @@ from solar_k import postprocess as skpp
 from solar_k import preprocess as skpre
 from solar_k import scorer as sksc
 from solar_k import tuning as sktune
-
-import validate_submission as vs
-from run_e002_eval import build_gt_for_stem, fold0_val_stems, load_annotation_index, load_prob_png
 
 H = W = 2048
 REPO_ROOT = skio.repo_root()
@@ -62,7 +67,7 @@ C_GRID = [round(x, 3) for x in np.arange(0.0, 0.525, 0.025)]
 @dataclass
 class ComponentCache:
     features_df: pd.DataFrame
-    sparse: "object"  # scipy.sparse.csr_matrix, one row per features_df row, same order
+    sparse: object  # scipy.sparse.csr_matrix, one row per features_df row, same order
 
 
 def build_component_cache(stem, probs, processed, disk_info, cfg, gt_by_annotator) -> ComponentCache:

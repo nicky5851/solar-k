@@ -168,7 +168,7 @@ def _pred_instance_area_and_coords(pred_masks, j: int, shape: tuple[int, int]) -
     if sp.issparse(pred_masks):
         row = pred_masks.getrow(j)
         cols = row.indices
-        h, w = shape
+        _h, w = shape
         ys, xs = np.divmod(cols, w)
         return int(row.sum()), ys, xs
     mask = pred_masks[j]

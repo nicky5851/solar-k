@@ -24,7 +24,7 @@ def test_limb_correction_flattens_radial_profile():
     disk_mask, r = pp.disk_mask_and_r(img.shape, cx, cy, radius)
     corrected = pp.limb_correct(img, disk_mask, r, radius)
 
-    raw_std = img[disk_mask].astype(np.float64).std()
+    img[disk_mask].astype(np.float64).std()
     corrected_std_normalized = (corrected[disk_mask] / corrected[disk_mask].mean()).std()
     raw_std_normalized = (img[disk_mask].astype(np.float64) / img[disk_mask].mean()).std()
     assert corrected_std_normalized < raw_std_normalized

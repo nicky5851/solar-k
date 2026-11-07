@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import collections
 import hashlib
-import json
 import sys
 import time
 from pathlib import Path
@@ -307,7 +306,7 @@ def task3_identifiers() -> dict:
 def fit_disk(img: np.ndarray) -> tuple[float, float, float]:
     """Otsu threshold + largest connected component -> (cx, cy, radius)."""
     _, mask = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    n, labels, stats, centroids = cv2.connectedComponentsWithStats(
+    n, _labels, stats, centroids = cv2.connectedComponentsWithStats(
         (mask > 0).astype(np.uint8), connectivity=8
     )
     if n <= 1:
@@ -382,7 +381,7 @@ def task4_5_instance_and_image_stats(ann: dict) -> dict:
             }
         )
 
-        n_annotators_here = len(img_entries)
+        len(img_entries)
         if idx % max(1, len(paths) // 12) == 0 and len(gallery_candidates) < 12:
             gallery_candidates.append((stem, {"path": path}))
 

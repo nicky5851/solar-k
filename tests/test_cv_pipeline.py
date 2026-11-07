@@ -14,11 +14,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from solar_k import components as skcomp
 from solar_k import cv_pipeline as cvp
 from solar_k import evaluate as skeval
 from solar_k import metric as skmetric
 from solar_k import postprocess as skpp
-from solar_k import components as skcomp
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 S = 160  # small synthetic image side
@@ -180,7 +180,7 @@ def test_agreement_features_without_member_probs_is_nan_but_ring_still_set():
 
 
 def test_extract_components_v2_columns_present_and_nan_without_members():
-    probs, processed, disk_info, gt = _synthetic_image(2)
+    probs, processed, disk_info, _gt = _synthetic_image(2)
     cfg = skpp.PostprocessConfig(mode="threshold", t=0.5, closing_radius=1, min_area=1)
     feats, _ = skcomp.extract_components("x", probs, processed, disk_info, cvp.components_cfg(cfg))
     df = skcomp.to_dataframe(feats)

@@ -23,7 +23,7 @@ def test_excluded_dates_cover_exact_train_test_dates_and_window():
 
 
 def test_excluded_dates_window_is_not_wider_than_three_days():
-    excluded = load_excluded_dates()
+    load_excluded_dates()
     # +/-4 days from an isolated real date would only be excluded by
     # coincidence (another nearby split date); pick a date whose neighbours
     # we can reason about structurally: the exclusion set must not contain

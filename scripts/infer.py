@@ -36,7 +36,7 @@ from solar_k import unet as sku
 # directory as this file, already prepended to sys.path by the shell's cwd
 # or explicit invocation -- add it explicitly to be safe either way).
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from train import fold_stems  # noqa: E402
+from train import fold_stems
 
 
 def main() -> None:

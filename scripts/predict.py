@@ -39,6 +39,8 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import validate_submission as vs
+
 from solar_k import components as skcomp
 from solar_k import cv_pipeline as cvp
 from solar_k import io as skio
@@ -47,8 +49,6 @@ from solar_k import postprocess as skpp
 from solar_k import preprocess as skpre
 from solar_k import scorer as sksc
 from solar_k import unet as sku
-
-import validate_submission as vs
 
 N_FOLDS = 5
 

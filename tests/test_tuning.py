@@ -1,7 +1,7 @@
 import numpy as np
 
-from solar_k import tuning as tn
 from solar_k import postprocess as skpp
+from solar_k import tuning as tn
 
 
 def test_min_area_grid_values():

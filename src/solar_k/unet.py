@@ -76,7 +76,7 @@ def restore_rng_state(state: dict) -> None:
         torch.cuda.set_rng_state_all(state["cuda"])
 
 
-def save_checkpoint(path: Path, model, optimizer, scheduler, iteration: int, best_metric: float, ema: "EMA | None" = None) -> None:
+def save_checkpoint(path: Path, model, optimizer, scheduler, iteration: int, best_metric: float, ema: EMA | None = None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(
         {
@@ -92,7 +92,7 @@ def save_checkpoint(path: Path, model, optimizer, scheduler, iteration: int, bes
     )
 
 
-def load_checkpoint(path: Path, model, optimizer=None, scheduler=None, map_location=None, restore_rng: bool = True, ema: "EMA | None" = None) -> dict:
+def load_checkpoint(path: Path, model, optimizer=None, scheduler=None, map_location=None, restore_rng: bool = True, ema: EMA | None = None) -> dict:
     ckpt = torch.load(path, map_location=map_location, weights_only=False)
     model.load_state_dict(ckpt["model"])
     if optimizer is not None and ckpt.get("optimizer") is not None:
@@ -177,7 +177,7 @@ def make_prob_fn(
         if scale == 1.0:
             return infer(arr)
         h, w = arr.shape
-        nh, nw = max(1, int(round(h * scale))), max(1, int(round(w * scale)))
+        nh, nw = max(1, round(h * scale)), max(1, round(w * scale))
         up = cv2.resize(arr, (nw, nh), interpolation=cv2.INTER_LINEAR)
         probs_up = infer(up)
         return cv2.resize(probs_up, (w, h), interpolation=cv2.INTER_LINEAR)

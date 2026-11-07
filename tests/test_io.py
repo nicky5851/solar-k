@@ -1,4 +1,3 @@
-from pathlib import Path
 
 from solar_k import io as skio
 

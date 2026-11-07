@@ -22,23 +22,19 @@ import argparse
 import json
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from solar_k import components as skcomp
 from solar_k import cv_pipeline as cvp
 from solar_k import ensemble as skens
 from solar_k import io as skio
-from solar_k import masks as skmasks
 from solar_k import postprocess as skpp
 from solar_k import preprocess as skpre
-from solar_k import scorer as sksc
 
 REPO_ROOT = skio.repo_root()
 INTERIM = REPO_ROOT / "data" / "interim"
@@ -52,7 +48,7 @@ BARS = {
 
 
 def log(msg: str) -> None:
-    print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] {msg}", flush=True)
+    print(f"[{datetime.now(UTC).strftime('%H:%M:%S')}] {msg}", flush=True)
 
 
 def decide(bar: str, cmp_cv: dict, cmp_model: dict | None) -> dict:
