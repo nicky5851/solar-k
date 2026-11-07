@@ -742,7 +742,47 @@ def summarise(per_fold: list[dict]) -> dict:
 
 # ------------------------------------------------------- final submission build
 
-def write_submission(experiment: str, members: list[str], stems: list[str], runner_workers: int, weight_grid: list[tuple[float, ...]] | None = None, log=print) -> dict:
+def dump_final_postproc(path: Path, *, cfg1: skpp.PostprocessConfig, shape_gate, scorer_c: float, scorer,
+                         regrow_t_mask: float, regrow_d: int, members: list[str], test_folds: list[int],
+                         member_weights=None) -> None:
+    """CODING_SPEC_08 2.1/2.3: persist the entire frozen post-processing chain
+    (cfg1, shape gate, scorer cutoff, regrow params, member/fold list and
+    weights) to one JSON file, so ``scripts/predict.py`` can reproduce the
+    final build from the committed config without refitting anything. The
+    scorer is a fitted ``FittedScorer`` (sklearn objects, not JSON-safe) --
+    pickled and base64-embedded in the same file, matching the spec's "one
+    committed JSON config" description."""
+    import base64
+
+    payload = {
+        "cfg1": cfg1.__dict__,
+        "shape_gate": list(shape_gate),
+        "scorer_c": scorer_c,
+        "scorer_pickle_b64": base64.b64encode(pickle.dumps(scorer)).decode("ascii"),
+        "regrow_t_mask": regrow_t_mask,
+        "regrow_d": regrow_d,
+        "members": list(members),
+        "test_folds": list(test_folds),
+        "member_weights": list(member_weights) if member_weights else None,
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload))
+
+
+def load_final_postproc(path: Path) -> dict:
+    """Inverse of ``dump_final_postproc``: returns a dict with ``cfg1`` as a
+    ``PostprocessConfig`` and ``scorer`` as the unpickled ``FittedScorer``,
+    ready to pass straight into the same keep/regrow calls ``write_submission``
+    uses."""
+    import base64
+
+    payload = json.loads(path.read_text())
+    payload["cfg1"] = skpp.PostprocessConfig.from_dict(payload["cfg1"])
+    payload["scorer"] = pickle.loads(base64.b64decode(payload.pop("scorer_pickle_b64")))
+    return payload
+
+
+def write_submission(experiment: str, members: list[str], stems: list[str], runner_workers: int, weight_grid: list[tuple[float, ...]] | None = None, log=print, postproc_out: Path | None = None) -> dict:
     """Final post-processing fit on all OOF stems (no CV split), applied to
     the mean of every member x fold test map (CODING_SPEC_05 E010/E013;
     CODING_SPEC_06 E024's ``scripts/build_final.py`` reuses this)."""
@@ -796,6 +836,11 @@ def write_submission(experiment: str, members: list[str], stems: list[str], runn
     if errors:
         raise SystemExit(f"{out} FAILED validate_submission.py: {errors[:5]}")
     log(f"wrote + validated {out} ({len(rows)} instances)")
+    if postproc_out is not None:
+        dump_final_postproc(postproc_out, cfg1=cfg1, shape_gate=rule["shape_gate"], scorer_c=rule["scorer_c"],
+                             scorer=rule["scorer"], regrow_t_mask=t_mask, regrow_d=d, members=members,
+                             test_folds=list(range(skens.N_MODEL_FOLDS)), member_weights=weights)
+        log(f"wrote frozen post-processing config -> {postproc_out}")
     return {"path": str(out.relative_to(skio.repo_root())), "n_instances": len(rows), "cfg1": cfg1.__dict__,
             "shape_gate": rule["shape_gate"], "scorer_c": rule["scorer_c"], "regrow_t_mask": t_mask, "regrow_d": d,
             "test_members": members, "test_folds": list(range(skens.N_MODEL_FOLDS)),

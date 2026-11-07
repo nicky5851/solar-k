@@ -32,6 +32,12 @@ MAGFiLO*/
 # ---- Large artifacts ----
 outputs/**
 !outputs/.gitkeep
+# CODING_SPEC_08: only the two final validated submissions are tracked --
+# small text files meant to be in the repo (everything else under outputs/,
+# including maps/checkpoints and older local baseline CSVs, stays ignored).
+!outputs/submissions/
+!outputs/submissions/E030_primary.csv
+!outputs/submissions/E013_backup.csv
 *.pt
 *.pth
 *.ckpt

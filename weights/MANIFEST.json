@@ -1,0 +1,137 @@
+[
+  {
+    "file": "weights/E007-f0.pt",
+    "model": "E007",
+    "fold": 0,
+    "encoder": "efficientnet-b4",
+    "sha256": "efae3b460d21bdb21f4828d255ec9915fac9ec2fb7cbdece78a400944d2dd8a6",
+    "bytes": 40935043,
+    "config_path": "configs/E007-f0.yaml"
+  },
+  {
+    "file": "weights/E007-f1.pt",
+    "model": "E007",
+    "fold": 1,
+    "encoder": "efficientnet-b4",
+    "sha256": "abe308570af8f7555ffecef79ce4646532bda49ff2e29224eb0e18c042201169",
+    "bytes": 40935043,
+    "config_path": "configs/E007-f1.yaml"
+  },
+  {
+    "file": "weights/E007-f2.pt",
+    "model": "E007",
+    "fold": 2,
+    "encoder": "efficientnet-b4",
+    "sha256": "be95934dadf1461176be915489d11f5cde6c83d84b50cae6dedcd5a8ff5c3f42",
+    "bytes": 40935043,
+    "config_path": "configs/E007-f2.yaml"
+  },
+  {
+    "file": "weights/E007-f3.pt",
+    "model": "E007",
+    "fold": 3,
+    "encoder": "efficientnet-b4",
+    "sha256": "a8f246e9bf0ca6c451fa79ac91a98ed9f023276f4988c3c54311aa09eca67d47",
+    "bytes": 40935043,
+    "config_path": "configs/E007-f3.yaml"
+  },
+  {
+    "file": "weights/E007-f4.pt",
+    "model": "E007",
+    "fold": 4,
+    "encoder": "efficientnet-b4",
+    "sha256": "dfe437239e5bdb58d7d03e4eee73a9ff0f5a461aa9e61e90ae4d605d45cbb36a",
+    "bytes": 40935043,
+    "config_path": "configs/E007-f4.yaml"
+  },
+  {
+    "file": "weights/E015-f0.pt",
+    "model": "E015",
+    "fold": 0,
+    "encoder": "tu-regnety_040",
+    "sha256": "e56381fdc26332bbaa518b024de74104d975da988305f2fc96a7f9303a251b4b",
+    "bytes": 49761919,
+    "config_path": "configs/E015-f0.yaml"
+  },
+  {
+    "file": "weights/E015-f1.pt",
+    "model": "E015",
+    "fold": 1,
+    "encoder": "tu-regnety_040",
+    "sha256": "d04bb0b7efb7944690f50ff609a4c5eb35d7d33655c9344a52a6719205e22bd6",
+    "bytes": 49761919,
+    "config_path": "configs/E015-f1.yaml"
+  },
+  {
+    "file": "weights/E015-f2.pt",
+    "model": "E015",
+    "fold": 2,
+    "encoder": "tu-regnety_040",
+    "sha256": "67513a194a0f808e67594eed62ae7945487eb62fdc7bef248673bd38fbfde9e0",
+    "bytes": 49761919,
+    "config_path": "configs/E015-f2.yaml"
+  },
+  {
+    "file": "weights/E015-f3.pt",
+    "model": "E015",
+    "fold": 3,
+    "encoder": "tu-regnety_040",
+    "sha256": "9c34d7eadf6035b2562d1279b3346b8dee38d862aef9f444498c6ff1372860d2",
+    "bytes": 49761919,
+    "config_path": "configs/E015-f3.yaml"
+  },
+  {
+    "file": "weights/E015-f4.pt",
+    "model": "E015",
+    "fold": 4,
+    "encoder": "tu-regnety_040",
+    "sha256": "16afa1ac9347c97430738741ba25b209b51c013788459279924d727233e130e4",
+    "bytes": 49761919,
+    "config_path": "configs/E015-f4.yaml"
+  },
+  {
+    "file": "weights/E004-f0.pt",
+    "model": "E004",
+    "fold": 0,
+    "encoder": "resnet34",
+    "sha256": "e9a8dd7797a03fa9b7926e25a94169b353fb49ff685730864d54d0f83d7c2920",
+    "bytes": 48982739,
+    "config_path": "configs/E004-f0.yaml"
+  },
+  {
+    "file": "weights/E004-f1.pt",
+    "model": "E004",
+    "fold": 1,
+    "encoder": "resnet34",
+    "sha256": "9aebf3e633c791b89a809569923e3d2a099615d77788d02fb1667cffaec33fb4",
+    "bytes": 48982739,
+    "config_path": "configs/E004-f1.yaml"
+  },
+  {
+    "file": "weights/E004-f2.pt",
+    "model": "E004",
+    "fold": 2,
+    "encoder": "resnet34",
+    "sha256": "552c40f3d1f73f07d4d971827b08cb18745ec2f61dd75cef128697788a7c57ea",
+    "bytes": 48982739,
+    "config_path": "configs/E004-f2.yaml"
+  },
+  {
+    "file": "weights/E004-f3.pt",
+    "model": "E004",
+    "fold": 3,
+    "encoder": "resnet34",
+    "sha256": "32d52cf89c23498e00cecb67639db3844ae7942a88df27426b81c73a7778709e",
+    "bytes": 48982739,
+    "config_path": "configs/E004-f3.yaml"
+  },
+  {
+    "file": "weights/E004-f4.pt",
+    "model": "E004",
+    "fold": 4,
+    "encoder": "resnet34",
+    "sha256": "5b26989e77a79bc1674b36aa44a4d1aea4621cc2e3a39b016e2a6595f231288f",
+    "bytes": 48982739,
+    "config_path": "configs/E004-f4.yaml"
+  }
+]

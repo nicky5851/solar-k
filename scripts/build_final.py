@@ -34,6 +34,10 @@ def main() -> None:
     ap.add_argument("--members", nargs="+", required=True)
     ap.add_argument("--weight-grid", nargs="*", default=None, help="e.g. 1.0,1.0 1.5,1.0 (comma-separated per-member weights)")
     ap.add_argument("--workers", type=int, default=3)
+    ap.add_argument("--postproc-out", type=Path, default=None,
+                     help="CODING_SPEC_08 2.1/2.3: also write the frozen post-processing chain "
+                          "(cfg1, shape gate, scorer, regrow, members/folds/weights) to this JSON path, "
+                          "for scripts/predict.py to reload without refitting.")
     args = ap.parse_args()
 
     weight_grid = None
@@ -51,7 +55,7 @@ def main() -> None:
     if not stems:
         raise SystemExit("no OOF images available for every member")
 
-    result = cvp.write_submission(args.experiment, args.members, stems, args.workers, weight_grid)
+    result = cvp.write_submission(args.experiment, args.members, stems, args.workers, weight_grid, postproc_out=args.postproc_out)
     print(f"{args.experiment}: {result['n_instances']} instances -> {result['path']}")
 
 
