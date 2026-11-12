@@ -6,11 +6,26 @@ import sys
 from datetime import date, timedelta
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 from fetch_external_gong import SITES, STEM_RE, load_excluded_dates, pick_one_per_site
 
+try:
+    load_excluded_dates()
+    _HAVE_TEST_IMAGES = True
+except FileNotFoundError:
+    _HAVE_TEST_IMAGES = False
 
+# These two tests read the competition test-image folder (data/raw, not
+# redistributed), so they only run where the Kaggle data has been downloaded.
+needs_test_images = pytest.mark.skipif(
+    not _HAVE_TEST_IMAGES, reason="needs the competition test images under data/raw (see data/README.md)"
+)
+
+
+@needs_test_images
 def test_excluded_dates_cover_exact_train_test_dates_and_window():
     excluded = load_excluded_dates()
     # A real train date from folds_v1.csv must itself be excluded.
@@ -22,6 +37,7 @@ def test_excluded_dates_cover_exact_train_test_dates_and_window():
     assert date(1999, 6, 15) not in excluded
 
 
+@needs_test_images
 def test_excluded_dates_window_is_not_wider_than_three_days():
     load_excluded_dates()
     # +/-4 days from an isolated real date would only be excluded by

@@ -79,7 +79,7 @@ All training ran on Kaggle (T4) or RunPod GPUs; `src/` and the CPU-only post-pro
    python3 scripts/validate_submission.py outputs/submissions/E030_primary.csv
    ```
 
-6. **Tests.** `python3 -m pytest` — CPU-only, no GPU or network, small synthetic fixtures (157 tests).
+6. **Tests.** `python3 -m pytest` — CPU-only, no GPU or network, small synthetic fixtures (157 tests; 2 of them need the competition test images in `data/raw/` and are skipped on a fresh clone).
 
 `experiments.csv` is the append-only experiment log — every run above, and every one tried and rejected, has a row with its hypothesis, decision, and the exact numbers behind it.
 
