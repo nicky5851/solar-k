@@ -33,10 +33,10 @@
 \subtitle{A Solution to the Solar Filament Segmentation Challenge 2026} % DO NOT CHANGE
 
 
-\author{Nicky}
+\author{Potcharapan (Nicky) Chumrak}
 \affiliation{%
-  \city{}
-  \country{}
+  \city{Nottingham}
+  \country{UK}
 }
 \email{nickyy5851@gmail.com}
 
@@ -48,10 +48,13 @@
     and skeleton-aware mask regrowth) and 4-flip + 1.25$\times$-upscale test-time augmentation. Our
     primary submission reaches a 5-fold day-grouped cross-validation Panoptic Quality (PQ) of
     0.4297 $\pm$ 0.0048 (0.4298 pooled) -- against a measured inter-annotator agreement ceiling of
-    only 0.3399 on this dataset.
-    Ten candidate improvements were tried against pre-registered statistical decision bars over the
-    course of this project; four were adopted and six were rejected on the evidence, including a
-    second model seed and a learned post-processing scorer that both overfit their selection split.
+    only 0.3399 on this dataset, and 0.37 on the public leaderboard.
+    Every candidate change was tested against pre-registered statistical decision bars; the
+    multi-scale TTA was the largest single gain, while more than a dozen others (a second model seed,
+    a third encoder, a learned scorer~v2, higher-resolution training and self-training on unlabelled
+    GONG images among them) were rejected on the evidence. All 15 trained checkpoints are released with
+    the code, and the submission can be regenerated from them.
+    Code and weights: \url{https://github.com/nicky5851/solar-k}.
 \end{abstract}
 
 \maketitle
@@ -69,7 +72,7 @@ Guide mode is on.}
 \section{Introduction}\label{sec:intro}
     This report goes over the details of our submitted solution to the Solar Filament Segmentation Challenge~2026 \cite{filament-segmentation-2026}. The challenge, launched on July~10,~2026, is organized by the Earth-Space AI Research (ESAIR) Lab\footnote{\href{https://www.esairlab.com/home}{www.esairlab.com/}}. This challenge utilizes the MAGFiLO dataset for evaluation of the segmentation algorithms \cite{ahmadzadeh2024dataset}.
 
-    The single most important fact about this task, established early and confirmed independently twice (Sec.~\ref{sec:dataset}; a transparent public baseline, discussed below), is that two expert human annotators agree with each other at only PQ~$=0.3399$ on this dataset. Every number in this report should be read against that ceiling, not against 1.0. We also found, by inspecting public Kaggle notebooks for this competition, that the public leaderboard's evaluator does not penalize missing or near-empty predictions correctly: an all-empty submission scores a public 0.88, and one RLE blob of precomputed answers (no training loop, exploiting a public copy of the underlying MAGFiLO dataset) scored ``0.55+''. We therefore never optimized against the public leaderboard and treat any public score above about 0.45 as unverified; every decision in this report was made on local, day-grouped 5-fold cross-validation alone.
+    The single most important fact about this task, established early and confirmed independently twice (Sec.~\ref{sec:dataset}; a transparent public baseline, discussed below), is that two expert human annotators agree with each other at only PQ~$=0.3399$ on this dataset. Every number in this report should be read against that ceiling, not against 1.0. We also found, by inspecting public Kaggle notebooks for this competition, that the public leaderboard's evaluator does not penalize missing or near-empty predictions correctly: an all-empty submission scores a public 0.88, and one RLE blob of precomputed answers (no training loop, exploiting a public copy of the underlying MAGFiLO dataset) scored ``0.55+''. A later audit of the public notebooks found none that genuinely scores above about 0.40 publicly. We therefore never optimized against the public leaderboard and treat any public score above about 0.45 as unverified; every decision in this report was made on local, day-grouped 5-fold cross-validation alone. We did not exploit the evaluator or use any labels beyond the competition training set.
 
 
 % ==================================== %
@@ -97,7 +100,7 @@ Guide mode is on.}
     At inference, each encoder's 5 fold-models are applied with 4-view flip TTA (identity, horizontal, vertical, both) plus a 1.25$\times$ upscale-only augmentation (never downscale, since that destroys 2~px filaments), averaged into one probability map; the two encoders' probability maps are then averaged into a single ensemble map. A second same-architecture seed and a third (weaker) encoder were both tried as additional ensemble members and rejected (Sec.~\ref{sec:evaluation}) -- the two-member, two-encoder ensemble above is what is submitted.
 
 \subsection{Post-processing}\label{sec:postprocessing}
-    The ensemble probability map is converted to instances by (1)~hysteresis thresholding (a low and a high threshold, with a morphological closing) into a binary mask, from which connected components become candidate instances; (2)~a learned linear scorer, trained on per-component shape and boundary-contrast features (elongation, skeleton length, mean/edge probability contrast) against a day-grouped inner split, filters low-confidence components at a tuned cutoff; (3)~a watershed-based \emph{regrow} step re-expands each kept component's mask outward along the probability map up to a fixed probability floor and pixel-distance limit, recovering boundary pixels the hard threshold cut off. All four stages' hyperparameters (threshold pair, closing radius, scorer cutoff, regrow floor/distance) are chosen jointly, per cross-validation fold, by a grid search on that fold's own training images only -- never on the held-out fold -- so the reported cross-validated PQ in Sec.~\ref{sec:evaluation} is a genuine out-of-fold number. Figure~\ref{fig:pipeline} summarizes the full pipeline.
+    The ensemble probability map is converted to instances in four steps: (1)~hysteresis thresholding (a low and a high threshold) with a morphological closing, whose connected components become candidate instances; (2)~an optional shape gate on component elongation and length; (3)~a learned scorer (logistic regression plus a depth-3 gradient-boosted classifier on per-component shape and probability-contrast features) that estimates $P(\text{match})\times E[\text{IoU}\mid\text{match}]$ and keeps components above a tuned cutoff; (4)~a watershed \emph{regrow} step that re-expands each kept component along the probability map down to a probability floor within a fixed dilation limit, recovering boundary pixels the hard threshold cut off. For every cross-validated number in Sec.~\ref{sec:evaluation}, all of these hyperparameters are refit inside each fold on that fold's training images only, never on the held-out fold. For the submission, the chain is fit once on all 707 out-of-fold training predictions and frozen (hysteresis 0.40/0.99, closing radius 3, no shape gate, scorer cutoff 0.325, regrow floor 0.4 with 4 dilation steps). Figure~\ref{fig:pipeline} summarizes the full pipeline.
 
     \begin{figure}[h]
       \centering
@@ -113,12 +116,13 @@ Guide mode is on.}
     All PQ/SQ/RQ numbers below are local, 5-fold day-grouped cross-validation (CV split by observation
     day, not by image, so all annotators of one image stay in one fold), with every post-processing
     hyperparameter refit per fold on that fold's own training images only (Sec.~\ref{sec:postprocessing}).
-    Two of the ten fold-checkpoints (one 5-fold encoder's folds 3 and 4) were lost after the original
-    scoring run and retrained from scratch on the original configs and seed; a dedicated check found
-    the retrained checkpoint reproduces the original pipeline's probability maps bit-for-bit, and the
-    full rebuilt pipeline's 5-fold PQ differs from the originally-scored run by $-0.0004$ pooled (max
-    $0.0038$ on any single fold), well inside this project's own $\pm0.005$ reproducibility bar --
-    the numbers below are from this verified-reproducible rebuild.
+    Two of the ten fold-checkpoints (the RegNetY-040 encoder's folds 3 and 4) were lost after the
+    original scoring run and retrained from scratch with the original configs and seed. Re-running
+    inference from an existing checkpoint reproduced its stored probability maps bit-for-bit (322 files,
+    maximum difference 0), so inference itself is deterministic; the retrained folds differ only through
+    GPU training nondeterminism. The rebuilt pipeline's PQ differs from the originally scored run by
+    $-0.0004$ pooled (at most $0.0038$ on any fold), inside our pre-set $\pm0.005$ reproducibility bar,
+    and the numbers below come from this rebuild.
     We never selected on, or report a final decision from, the public leaderboard (Sec.~\ref{sec:intro}).
     Every candidate change below was accepted or rejected against a pre-registered statistical bar
     (minimum mean $\Delta$PQ, fraction of folds positive, and a bootstrap 95\% CI excluding 0 on the
@@ -126,8 +130,10 @@ Guide mode is on.}
 
     \begin{table}[h]
       \caption{Progression of the submitted pipeline. PQ is pooled across all 707 train images'
-      out-of-fold predictions; Kaggle LB is the public leaderboard (unverified, Sec.~\ref{sec:intro}).}
+      out-of-fold predictions; Kaggle LB is the public leaderboard (unverified, Sec.~\ref{sec:intro}).
+      $^{\dagger}$Our backup submission; rebuilt from the released weights it scores 0.4176.}
       \label{tab:results}
+      \resizebox{\columnwidth}{!}{%
       \begin{tabular}{lccccl}
         \toprule
         Model & PQ & SQ & RQ & LB & Notes \\
@@ -136,17 +142,18 @@ Guide mode is on.}
         E001 (classical) & 0.0346 & 0.6317 & 0.0547 & -- & dark-feature baseline \\
         E002 (1 U-Net) & 0.2691 & -- & -- & -- & single fold, no ensemble \\
         E004$\times$5 (1 enc.) & 0.3948 & 0.676 & 0.584 & 0.35 & 5-fold CV, no 2nd encoder \\
-        +2nd encoder & 0.4086 & 0.680 & 0.601 & 0.37 & 2-encoder ensemble (backup) \\
-        \textbf{+TTA (submitted)} & \textbf{0.4298} & \textbf{0.681} & \textbf{0.631} & \textbf{0.37} & 4-flip + 1.25$\times$ scale \\
+        +2nd encoder & 0.4086 & 0.680 & 0.601 & 0.37 & 2-enc. ensemble$^{\dagger}$ \\
+        \textbf{Final (submitted)} & \textbf{0.4298} & \textbf{0.681} & \textbf{0.631} & \textbf{0.37} & 4-flip + 1.25$\times$ scale \\
         \bottomrule
-      \end{tabular}
+      \end{tabular}}
     \end{table}
 
-    Ten candidate changes beyond the two-encoder ensemble were tried; the decision table and full
-    per-experiment rationale are in our project's internal report. Four were adopted: a wider
-    post-processing grid search, dropping a third, weaker encoder from the ensemble (it was net-negative
-    at every weight once the grid widened), and the TTA change in Table~\ref{tab:results}'s last row.
-    Six were rejected, each on a pre-registered bar failing, including: a second same-architecture
+    The full decision table, with each experiment's $\Delta$PQ and the bar it missed, is in
+    \texttt{reports/08\_final\_writeup.md} in our code repository. The changes adopted were a wider
+    post-processing grid search, using RegNetY-040 rather than ResNet-34 as the second encoder (keeping
+    all three encoders was net-negative at every ensemble weight once the grid widened), and the TTA change in
+    Table~\ref{tab:results}'s last row. More than a dozen others were rejected, each on a pre-registered
+    bar, including: a second same-architecture
     model seed (passed a cheap early gate but the full ensemble-promotion bar needed mean
     $\Delta\text{PQ}\geq0.010$ on $\geq4/5$ folds, and it only reached $+0.0023$ on 3/5); a learned
     scorer~v2 using cross-member agreement features, which won its own inner-split selection in 4/5
@@ -154,17 +161,25 @@ Guide mode is on.}
     overfitting signature; a connectivity-trained encoder with a skeleton-recall loss term, which failed
     its own cheap gate before the full 5-fold training cost was paid; and a fragment-merging
     post-process step that fixed the error type it targeted (one-to-many/split errors fell) but
-    increased many-to-one/merge errors, violating an explicit project constraint. One experiment --
+    increased many-to-one/merge errors, violating an explicit project constraint. Two late levers, training
+    at 1.5$\times$ input resolution and self-training on pseudo-labelled unlabelled GONG images (images
+    only, no external labels), both failed their early gates ($\Delta$PQ $-0.002$ to $-0.008$). One experiment --
     adding a 1.25$\times$ upscale pass to an already-present flip-only TTA -- was run as a controlled
     pair specifically to isolate which half of the change was doing the work: 4~flip views alone changed
     PQ by $-0.0009$ (noise); adding the scale moved it by $+0.0082$ pooled across all 5 folds (CI
     $[0.0042, 0.0127]$), the single largest and cleanest-signed gain in the project.
 
-    \textbf{Error decomposition.} 69\% of all false negatives in the submitted pipeline have no
+    \textbf{Distributions.} Over 1154 annotator--image pairs, per-image pixel Dice has mean 0.654
+    (median 0.688, IQR 0.598--0.755) and per-image pixel IoU mean 0.503 (median 0.524, IQR 0.427--0.606).
+    Pooled over all 707 images the final pipeline has TP $=4742$, FP $=2080$, FN $=3457$. PQ varies
+    by only 0.037 across the six GONG sites (0.417--0.454).
+
+    \textbf{Error decomposition.} 69.5\% of all false negatives have no
     overlapping prediction at all (undetected filaments), concentrated in the smallest quartile of
-    ground-truth instance area (PQ 0.31 in that quartile vs.\ 0.49 in the largest). One-to-many
-    (fragmentation) and many-to-one (merging) instance-identity errors are a comparatively small share
-    (660 and 320 FN+FP pairs respectively, vs.\ 3349 undetected-filament FN+FP) and were essentially unmoved by the
+    ground-truth instance area (PQ 0.31 in that quartile vs.\ 0.50 in the largest, driven by RQ
+    0.46 vs.\ 0.71 while SQ stays at 0.66--0.70). One-to-many
+    (fragmentation: 219 FN, 450 FP) and many-to-one (merging: 209 FN, 102 FP) errors are a comparatively
+    small share (669 and 311 FN+FP respectively, vs.\ 3347 for undetected filaments) and were essentially unmoved by the
     TTA change -- the gain is a genuine recall improvement on faint/small filaments, not a reshuffling of
     which error type dominates. Figure~\ref{fig:gallery} shows this directly: a typical image, the
     worst fragmentation case, the worst merge case, and a faint filament recovered by TTA that the
@@ -182,9 +197,15 @@ Guide mode is on.}
     quartile) is the largest remaining lever and was only partly addressed this cycle; a scorer that
     actually generalizes past the inner-split overfitting we observed, or a loss term that more directly
     rewards small/faint-instance recall during training (rather than only at TTA/post-processing time),
-    are the most promising untried directions. We also have not re-verified, at the end of this project,
-    that our evaluation protocol is itself fully deterministic run-to-run at every new configuration --
-    we rely on an earlier spec's one-time check of this rather than re-running it per experiment.
+    are the most promising untried directions.
+
+    \textbf{Code and reproducibility.} Code, configs, the 15 trained fp16 EMA checkpoints (as a
+    GitHub release, sha256-checked) and both submission files are at
+    \url{https://github.com/nicky5851/solar-k} (tag \texttt{v1.0-final}). Running
+    \texttt{download\_weights.py} then \texttt{predict.py} regenerates the submission: from the released
+    weights it matches the submitted file's instance count on 172 of 176 test images, with mean IoU
+    0.9998 on those, and is bit-identical on 73.5\% of images. The remaining differences come from GPU
+    nondeterminism.
 
 % ==================================== %
 %            ACKNOWLEDGMENT            %

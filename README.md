@@ -99,4 +99,4 @@ data/, outputs/   gitignored (raw data, caches, checkpoints, maps -- see data/RE
 
 ## Licence / citation
 
-Code: MIT (see `LICENSE`). Dataset: CC BY-NC 4.0 per the competition terms, not redistributed here — see `data/README.md`.
+Code: MIT (see `LICENSE`); the licence covers the code only. Dataset: CC BY-NC 4.0 per the competition terms, not redistributed here — see `data/README.md`.
