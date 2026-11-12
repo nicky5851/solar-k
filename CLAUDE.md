@@ -2,7 +2,7 @@
 
 Project: Solar_K, an entry for the Kaggle **Solar Filament Segmentation Challenge 2026**
 (instance segmentation of solar filaments in 2048×2048 GONG H-alpha images, scored by Panoptic Quality).
-Deadline: **2026-11-15**. Scientific context and phases are in `docs/RESEARCH_PLAN.md`. The facts and decisions log is `docs/Notes.md`.
+Deadline: **2026-11-15**. The facts and decisions log is `docs/Notes.md`. Status: complete; the final package is described in `reports/08_final_writeup.md`.
 
 ## How work arrives
 - Work comes as numbered specs: `docs/specs/CODING_SPEC_XX_<name>.md`. Implement **only** what the current spec asks for. If a spec is ambiguous or conflicts with the data, stop and write the question into the spec's report rather than guessing.
@@ -25,7 +25,7 @@ Deadline: **2026-11-15**. Scientific context and phases are in `docs/RESEARCH_PL
 
 ## Compute
 - Development machine: MacBook Air M2 with **8 GB unified memory**. Process images one at a time and stream them, because a single 2048×2048 instance stack adds up quickly. Never load the whole dataset or all masks into memory. Use `torch.device("mps")` when it's available and fall back to CPU.
-- Heavy training runs on Kaggle GPUs. Don't assume a fixed quota. Training code must be portable (paths and device come from config or env), must checkpoint regularly, and must resume from the last checkpoint.
+- Heavy training ran on Kaggle GPUs and RunPod pods (from Spec 05 on, all GPU work was on RunPod). Don't assume a fixed quota. Training code must be portable (paths and device come from config or env), must checkpoint regularly, and must resume from the last checkpoint.
 
 ## Metric and submission
 - The local scorer must reproduce the organisers' self-evaluation notebook (`data/external/self-evaluation-notebook.ipynb` once present). Don't substitute a generic panoptic library.

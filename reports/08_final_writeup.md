@@ -1,8 +1,8 @@
 # Report 08: Final write-up (Solar Filament Instance Segmentation)
 
-**Primary: `E030_primary.csv`** (E007tta4s + E015tta4sR, local CV PQ 0.4298 pooled / 0.4297 ± 0.0048 CV mean, public 0.37 — inherited from E024, which it reproduces).
+**Primary: `E030_primary.csv`** (E007tta4s + E015tta4sR, local CV PQ 0.4298 pooled / 0.4297 ± 0.0048 CV mean, public 0.37, scored on Nov 7; it reproduces E024, which also scored 0.37).
 **Backup: `E013_backup.csv`** (E004 + E007, local CV PQ 0.4176 pooled, public 0.37 for the original E013).
-Neither has been submitted. Choosing which to submit, and whether to submit at all, is Nicky's call (CODING_SPEC_08 §7).
+Final Kaggle selection: E030 primary, E013 backup. Selection and submission were made by hand, never automated (CODING_SPEC_08 §7).
 
 ---
 
@@ -171,6 +171,6 @@ Re-verified (16:40 UTC) against the real `E030_primary.csv`/`E013_backup.csv`:
 - **Primary**: 172/176 images now match instance counts exactly (up from 155/176); on those, mean IoU **0.9998**, min 0.9950, and **73.5% exactly bit-identical**. 4 images still differ by one instance (`20131027185354Bh`, `20170313145450Bh`, `20210627163630Mh`, `20220523234912Lh`), consistent with ordinary GPU/cuDNN run-to-run nondeterminism rather than the quantization gap.
 - **Backup**: **174/174 images match instance counts exactly** (up from 136/174), mean IoU **0.9998**, min 0.9894, 99.91% of instances ≥0.99 IoU, and **75.2% exactly bit-identical** — the cleanest result of the two pipelines (no residual count mismatches at all), consistent with the backup's simpler 3-flip-only, no-scale TTA recipe leaving less floating-point surface for GPU nondeterminism.
 
-**This is a materially stronger result than the initial check**: `predict.py` is now bit-exact on roughly three-quarters of test images and ≥0.99 IoU with matching instance counts on essentially all the rest, with only a handful of primary-pipeline images (none on the backup) differing by a single instance for reasons unrelated to the fix. This is stated plainly, including the residual gap, rather than claimed as a full bit-exact guarantee; see `docs/HANDOFF.md` (2026-11-07, entries from 09:40 through 17:06 UTC) for the complete numbers and diagnosis.
+**This is a materially stronger result than the initial check**: `predict.py` is now bit-exact on roughly three-quarters of test images and ≥0.99 IoU with matching instance counts on essentially all the rest, with only a handful of primary-pipeline images (none on the backup) differing by a single instance for reasons unrelated to the fix. This is stated plainly, including the residual gap, rather than claimed as a full bit-exact guarantee. The numbers above are the complete result of that check.
 
 **Compute used, this spec (CODING_SPEC_08, Nov 7):** one RunPod RTX 4090 pod (`85ki7s4ssa3lqv`), ~6+ hours: E015-f3/f4 retrain (~43 min each) + TTA inference, E004-f2/f3/f4 retrain (~29 min each), two full P5 runs (~38 min each) for the E030 and E013 reproducibility checks, weight export, and the `predict.py` end-to-end verification. At $0.89/hr this phase cost roughly $5–6. Total project compute across all 8 specs is tracked per-experiment in `experiments.csv`'s `compute` column. No Kaggle-notebook hours were used in this spec (all GPU work ran on RunPod).

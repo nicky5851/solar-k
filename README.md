@@ -7,15 +7,17 @@ See `data/README.md` for where to put the dataset (CC BY-NC 4.0 — not redistri
 ## Final result
 
 **Primary: `outputs/submissions/E030_primary.csv`** — U-Net ensemble of `efficientnet-b4` (E007) + `tu-regnety_040` (E015), 4-flip + 1.25x-upscale TTA, 5-fold OOF-fitted post-processing. Local day-grouped 5-fold CV PQ **0.4298** (SQ 0.681, RQ 0.631). Public LB 0.37.
-**Backup: `outputs/submissions/E013_backup.csv`** — `resnet34` (E004) + `efficientnet-b4` (E007), 3-flip TTA. Local CV PQ **0.4176**. Public LB 0.37.
+**Backup: `outputs/submissions/E013_backup.csv`** — `resnet34` (E004) + `efficientnet-b4` (E007), 3-flip TTA. Local CV PQ **0.4176** (rebuilt Nov 7 after three E004 folds were retrained; the original E013 scored 0.4086 locally). Public LB 0.37 (original E013).
 
-Neither has been submitted to Kaggle (submission is a human decision, not automated here). Full write-up, by-site/by-area breakdowns, failure taxonomy and the rejected-experiment table: **`reports/08_final_writeup.md`**.
+E030 was submitted to Kaggle on Nov 7 and scored 0.37 public, the same as E024, which it reproduces. Final selection: E030 primary, E013 backup. Submission was always a human decision, never automated here. Full write-up, by-site/by-area breakdowns, failure taxonomy and the rejected-experiment table: **`reports/08_final_writeup.md`**.
 
 | | PQ (local CV) | Public LB |
 |---|---|---|
 | E010 (E004 alone) | 0.3948 ± 0.0067 | — |
-| E013 backup (E004+E007) | 0.4086 ± 0.0050 | 0.37 |
-| **E030 primary** (E007tta4s+E015tta4sR) | **0.4297 ± 0.0048** | 0.37 |
+| E013 (E004+E007, original) | 0.4086 ± 0.0050 | 0.37 |
+| E013 backup (rebuilt from shipped weights) | 0.4176 ± 0.0060 | — |
+| E024 (E007tta4s+E015tta4s) | 0.4302 | 0.37 |
+| **E030 primary** (E007tta4s+E015tta4sR, rebuilt from shipped weights) | **0.4297 ± 0.0048** | **0.37** |
 
 ## Reports
 
@@ -27,7 +29,7 @@ Two separate paths, for two separate purposes:
 
 ### A. Reproduce the submission from shipped weights (no GPU training needed)
 
-This is what a judge runs. Weights (15 fp16 EMA checkpoints, ~650MB total) are **not** in git — they ship as a GitHub Release asset (`v1.0-final`), checksummed against `weights/MANIFEST.json`.
+This is what a judge runs. Weights (15 fp16 EMA checkpoints, ~700 MB total) are **not** in git — they ship as a GitHub Release asset (`v1.0-final`), checksummed against `weights/MANIFEST.json`.
 
 ```
 python3 scripts/download_weights.py                        # fetch + sha256-verify weights/*.pt
@@ -36,7 +38,7 @@ python3 scripts/predict.py --pipeline backup   --out outputs/submissions/E013_ba
 python3 scripts/validate_submission.py outputs/submissions/E030_primary.csv
 ```
 
-`predict.py` runs fresh TTA inference from the shipped weights and applies the frozen post-processing chain in `configs/final_postproc_{primary,backup}.json` (cfg1, shape gate, the fitted scorer, cutoff, watershed regrow) — nothing is refit at this stage. This needs a GPU for inference speed but not for training; `torch.device("mps")`/CPU both work, just slower.
+`predict.py` runs fresh TTA inference from the shipped weights and applies the frozen post-processing chain in `configs/final_postproc_{primary,backup}.json` (cfg1, shape gate, the fitted scorer, cutoff, watershed regrow) — nothing is refit at this stage. It is not bit-exact: on Nov 7 it matched instance counts on 172/176 test images for the primary (174/174 for the backup) with mean IoU 0.9998 on matched images. See `reports/08_final_writeup.md` §8. This needs a GPU for inference speed but not for training; `torch.device("mps")`/CPU both work, just slower.
 
 ### B. Reproduce from scratch (training, the actual development path)
 
@@ -91,9 +93,10 @@ weights/          MANIFEST.json only -- actual .pt files come from the GitHub Re
 tests/            unit tests, esp. for the metric, RLE encoding, and splits
 docs/specs/       the numbered specs this project was built from
 reports/          one dated write-up per spec; 08 is the final deliverable
-data/, outputs/   gitignored (raw data, caches, checkpoints, maps -- see data/README.md)
+data/, outputs/   gitignored (raw data, caches, checkpoints, maps -- see data/README.md),
+                  except outputs/submissions/{E030_primary,E013_backup}.csv
 ```
 
 ## Licence / citation
 
-Code: no licence file yet (ask before reusing). Dataset: CC BY-NC 4.0 per the competition terms, not redistributed here — see `data/README.md`.
+Code: MIT (see `LICENSE`). Dataset: CC BY-NC 4.0 per the competition terms, not redistributed here — see `data/README.md`.
